@@ -1,2 +1,9 @@
 # riscv-softcore-2018
-contains the verilog source of the winning entries to the RISCV Softcore Contest: https://riscv.org/2018/12/risc-v-softcpu-contest-highlights
+
+
+## Original Sources:
+
+- **VexRisc**: https://github.com/SpinalHDL/VexRiscvSoftcoreContest2018
+- **engine-V**: https://github.com/micro-FPGA/engine-V
+- **Reindeer**: https://github.com/PulseRain/Reindeer
+- **serv**: https://github.com/olofk/serv
