@@ -1,5 +1,10 @@
 # riscv-softcore-2018
 
+The purpose of this repository is to house
+a number of RISCV Softcore entries for
+the Lattice FPGA in a common format to
+enable better comparison.
+
 
 ## Original Sources:
 
