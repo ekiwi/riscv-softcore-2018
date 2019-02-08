@@ -141,23 +141,23 @@ end
 
 always @(ROM_Data or Inst or DidPause or Pause or Z or Disp)
 begin : process_2
-	Rd_Addr <= {16{1'b x}};   
-	Rr_Addr <= {16{1'b x}};   
-	Rd_Addr[4:0] <= ROM_Data[8:4];   
-	Rr_Addr[4:0] <= {ROM_Data[9], ROM_Data[3:0]};   
+	Rd_Addr = {16{1'b x}};
+	Rr_Addr = {16{1'b x}};
+	Rd_Addr[4:0] = ROM_Data[8:4];
+	Rr_Addr[4:0] = {ROM_Data[9], ROM_Data[3:0]};
 	if (ROM_Data[15:12] === 4'b 0011 | ROM_Data[15:14] === 2'b 01 | ROM_Data[15:12] === 4'b 1110)
 	begin
-		Rd_Addr[4] <= 1'b 1;   
+		Rd_Addr[4] = 1'b 1;
 	end
 	if (DidPause === 2'b 00 & Pause === 2'b 01)
 	begin
 		if (Inst[15:9] === 7'b 1000000)
 		begin
-			Rd_Addr[4:0] <= Inst[8:4];   
+			Rd_Addr[4:0] = Inst[8:4];
 		end
 		if (Inst[15:9] === 7'b 1000001)
 		begin
-			Rr_Addr[4:0] <= Inst[8:4];   
+			Rr_Addr[4:0] = Inst[8:4];
 		end
 	end
 end
@@ -165,19 +165,19 @@ end
 
 always @(Inst or DidPause or Rd_Addr or Rr_Addr or Z)
    begin : process_3
-   RAM_IR <= 1'b 0;   
-   Reg_IW <= 1'b 0;   
-   RAM_IW <= 1'b 0;   
+   RAM_IR = 1'b 0;
+   Reg_IW = 1'b 0;
+   RAM_IW = 1'b 0;
    if (DidPause === 2'b 00 & Inst[15:10] === 6'b 100000)
       begin
       if (Inst[9] === 1'b 0)
          begin
-         RAM_IR <= 1'b 1;   
-         Reg_IW <= 1'b 1;   
+         RAM_IR = 1'b 1;
+         Reg_IW = 1'b 1;
          end
       else
          begin
-         RAM_IW <= 1'b 1;   
+         RAM_IW = 1'b 1;
          end
       end
    end
@@ -201,21 +201,21 @@ always @(posedge Clk)
       DidPause[0] === 1'b 0 | ROM_Data[15:11] === 5'b 10111 & 
       PreDecode === 1'b 1)
          begin
-         IO_Wr_i <= 1'b 1;   
+         IO_Wr_i <= 1'b 1;
          end
       else
          begin
-         IO_Wr_i <= 1'b 0;   
+         IO_Wr_i <= 1'b 0;
          end
       if (Inst[15:10] !== 6'b 100110 | DidPause[0] === 1'b 1)
          begin
          if (ROM_Data[13] === 1'b 0)
             begin
-            IO_Addr_i <= {1'b 0, ROM_Data[7:3]};   
+            IO_Addr_i <= {1'b 0, ROM_Data[7:3]};
             end
          else
             begin
-            IO_Addr_i <= {ROM_Data[10:9], ROM_Data[3:0]};   
+            IO_Addr_i <= {ROM_Data[10:9], ROM_Data[3:0]};
             end
          end
       end
