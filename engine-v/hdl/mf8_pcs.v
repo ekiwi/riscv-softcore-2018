@@ -3,9 +3,9 @@
  * Apache 2.0 License
  */
 
-module mf8_pcs(Clk, Reset_n, Offs_In, Pause, RJmp, NPC, PC);
+module mf8_pcs(Clk, Reset, Offs_In, Pause, RJmp, NPC, PC);
 	input	Clk;
-	input	Reset_n;
+	input	Reset;
 	input	[11:0]	Offs_In;
 	input	Pause;
 	input	RJmp;
@@ -25,8 +25,8 @@ module mf8_pcs(Clk, Reset_n, Offs_In, Pause, RJmp, NPC, PC);
 	assign	real_offset	= (RJmp == 1'b0) ? (inc_or_nop)	: (Offs_In);
 	assign	NPC_i	= PC_i + real_offset;
 
-	always @(posedge Clk or negedge Reset_n) begin
-		if (Reset_n == 1'b0) begin
+	always @(posedge Clk) begin
+		if (Reset == 1'b1) begin
 			PC_i	<= 12'b000000000000;
 		end else begin
 			PC_i	<= NPC_i;

@@ -10,11 +10,11 @@ module tb (
 	always #10 clk = ~clk;
 `endif
 
-	reg resetn = 0;
-	integer resetn_cnt = 0;
+	reg reset = 1;
+	integer reset_cnt = 0;
 
-	reg uresetn = 0;
-	integer uresetn_cnt = 0;
+	reg ureset = 1;
+	integer ureset_cnt = 0;
 
 	integer cycle = 0;
 
@@ -33,10 +33,10 @@ module tb (
 	end
 
 	always @(posedge clk) begin
-		if (resetn_cnt < 200)
-			resetn_cnt <= resetn_cnt + 1;
+		if (reset_cnt < 200)
+			reset_cnt <= reset_cnt + 1;
 		else
-			resetn <= 1;
+			reset <= 0;
 	end
 
 	wire UART_RX_wire;
@@ -51,7 +51,7 @@ module tb (
 
 	MF8A18_SoC soc (
 		.clk		(clk),
-		.resetn		(resetn),
+		.reset		(reset),
 		.FLASH_MISO	(FLASH_MISO),
 		.FLASH_MOSI	(FLASH_MOSI),
 		.FLASH_SCK	(FLASH_SCK),
@@ -75,7 +75,7 @@ module tb (
 	);
 
 	rx uart_rx_inst (
-		.res_n		(uresetn),
+		.res		(ureset),
 		.rx		(UART_RX_wire),
 		.clk		(uart_baud_4x),		 /* Baud Rate x 4 (4 posedge's per bit) */
 		.rx_byte	(UART_rx_byte),
@@ -91,10 +91,10 @@ module tb (
 	end
 
 	always @(posedge uart_baud_4x) begin
-		if (uresetn_cnt < 2)
-			uresetn_cnt <= uresetn_cnt + 1;
+		if (ureset_cnt < 2)
+			ureset_cnt <= ureset_cnt + 1;
 		else
-			uresetn <= 1;
+			ureset <= 0;
 
 		if (UART_rx_rdy) begin
 			if (UART_rx_byte == 8'hff) begin

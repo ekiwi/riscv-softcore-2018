@@ -5,7 +5,7 @@
 
 module MF8A18 (
    CLK,
-   RSTn,
+   RST,
    rom_addr,
    rom_data,
    maddr,
@@ -21,7 +21,7 @@ module MF8A18 (
  
 
 input   CLK; 
-input   RSTn; 
+input   RST;
 output   [9:0] rom_addr; 
 input   [15:0] rom_data; 
 output   [15:0] maddr; 
@@ -46,8 +46,8 @@ reg     SPI_MOSI;
 reg     SPI_SCK; 
 reg     SPI_CS; 
 reg     UART_TXD; 
-reg     Reset_s_n; 
-wire    Reset_s_n_i; 
+reg     Reset_s;
+wire    Reset_s_i;
 wire    IO_Rd; 
 wire    IO_Wr; 
 wire    [5:0] IO_Addr; 
@@ -69,12 +69,12 @@ assign mwrite = mwrite_i;
 
 always @(posedge CLK)
 begin : process_1
-	Reset_s_n <= RSTn;   
+	Reset_s <= RST;
 end
 
-always @(posedge CLK or negedge Reset_s_n)
+always @(posedge CLK)
 begin : process_2
-	if (Reset_s_n === 1'b 0)
+	if (Reset_s === 1'b 1)
 	begin
 		UART_TXD <= 1'b 1;   
 		SPI_CS   <= 1'b 1;   
@@ -96,7 +96,7 @@ assign mwdata = IO_WData;
 
 mf8_core core (
 	.Clk		(CLK),
-        .Reset_n	(Reset_s_n),
+        .Reset		(Reset_s),
         .ROM_Addr	(rom_addr[9:0]),
         .ROM_Data	(rom_data),
         .ZZ		(maddr_i),
@@ -113,4 +113,3 @@ mf8_core core (
 assign IO_RData = {7'b 0000000, SPI_MISO}; 
 
 endmodule //
-

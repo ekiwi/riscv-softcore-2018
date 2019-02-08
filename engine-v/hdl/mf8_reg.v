@@ -4,9 +4,9 @@
  */
 
 
-module mf8_reg(Clk, Reset_n, Wr, Rd_Addr, Rr_Addr, Data_In, Rd_Data, Rr_Data, Z);
+module mf8_reg(Clk, Reset, Wr, Rd_Addr, Rr_Addr, Data_In, Rd_Data, Rr_Data, Z);
 	input	Clk;
-	input	Reset_n;
+	input	Reset;
 	input	Wr;
 	input	[4:0]	Rd_Addr;
 	input	[4:0]	Rr_Addr;

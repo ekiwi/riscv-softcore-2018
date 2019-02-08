@@ -6,7 +6,7 @@
 
 module MF8A18_SoC (
 	clk,
-	resetn,
+	reset,
 	FLASH_SCK,
 	FLASH_CS,
 	FLASH_MISO,
@@ -20,7 +20,7 @@ module MF8A18_SoC (
 	output FLASH_MOSI;
 
 	input clk;
-	input resetn;	
+	input reset;
 	output UART_TXD;
 
 	wire [9:0] rom_addr;
@@ -33,7 +33,7 @@ module MF8A18_SoC (
 
 	MF8A18 cpu (
 		.CLK		(clk),
-        	.RSTn		(resetn),
+        	.RST		(reset),
 	        .SPI_CS		(FLASH_CS),
 	        .SPI_MISO	(FLASH_MISO),
 	        .SPI_MOSI	(FLASH_MOSI),

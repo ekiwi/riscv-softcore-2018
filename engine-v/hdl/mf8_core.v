@@ -6,7 +6,7 @@
 
 module mf8_core (
    Clk,
-   Reset_n,
+   Reset,
    ROM_Addr,
    ROM_Data,
    ZZ,
@@ -23,7 +23,7 @@ module mf8_core (
 input ram_ready;
 
 input   Clk; 
-input   Reset_n; 
+input   Reset;
 output   [9:0] ROM_Addr; 
 input   [15:0] ROM_Data; 
 output   [15:0] ZZ; 
@@ -188,9 +188,9 @@ assign IO_Wr = IO_Wr_i;
 
 assign IO_WData = Rd_Data; 
 
-always @(negedge Reset_n or posedge Clk)
+always @(posedge Clk)
    begin : process_4
-   if (Reset_n === 1'b 0)
+   if (Reset === 1'b 1)
       begin
       IO_Addr_i <= {6{1'b 0}};   
       IO_Wr_i <= 1'b 0;   
@@ -225,9 +225,9 @@ assign Inst_Skip = Z_Skip | RJmp;
 
 assign N_Inst = Inst_Skip === 1'b 1 | Rst_r === 1'b 1 ? 16'h 0000 : Pause !== 2'b 00 & DidPause === 2'b 00 |  DidPause[1] === 1'b 1 ? Inst : ROM_Data; 
 
-always @(negedge Reset_n or posedge Clk)
+always @(posedge Clk)
 begin : process_5
-	if (Reset_n === 1'b 0)
+	if (Reset === 1'b 1)
 	begin
 		Rst_r <= 1'b 1;   
 		Inst <= {16{1'b 0}};   
@@ -323,7 +323,7 @@ mf8_alu alu (
 
 mf8_pcs mf8_pc (	
           .Clk		(Clk),
-          .Reset_n	(Reset_n),
+          .Reset	(Reset),
           .Offs_In	(Offset),
           .Pause	(PCPause),
           .RJmp		(RJmp),
@@ -333,7 +333,7 @@ mf8_pcs mf8_pc (
 
 mf8_reg pr (	
           .Clk		(Clk),
-          .Reset_n	(Reset_n),
+          .Reset	(Reset),
           .Wr		(Reg_Wr),
           .Rd_Addr	(Rd_Addr[4:0]),
           .Rr_Addr	(Rr_Addr[4:0]),
@@ -344,4 +344,3 @@ mf8_reg pr (
 );
 
 endmodule //
-

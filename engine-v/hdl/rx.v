@@ -10,7 +10,7 @@
  * Has asynchronous reset. 
  */ 
 module rx (
-  input         res_n,
+  input         res,
   input         rx,
   input         clk, /* Baud Rate x 4 (4 posedge's per bit) */
   output  [7:0] rx_byte,
@@ -70,9 +70,9 @@ begin
 end
 
 /* Sense the start bit on posedge and negedge */
-always @ (posedge clk or negedge res_n)
+always @ (posedge clk)
 begin
-   if (!res_n) 
+   if (res)
     begin
       state <= WAIT;
       count <= 5'd0;
@@ -95,9 +95,9 @@ end
 
 /* If we are reading, stample the RX bits 
    every 3 samples shift it into RX byte */
-always @ (posedge clk or negedge res_n)
+always @ (posedge clk)
 begin
-   if (!res_n) 
+   if (res)
       rx_byte_ff <= 8'd0;
    else
      if ((state == READ) && count[1] && count[0])  /* When we are at count 3, sample the shift register */
