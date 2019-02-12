@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import sys, os
+import sys, os, tempfile, subprocess
 import kast
 from enum import Enum
 from typing import Optional, List, Union
@@ -259,6 +259,31 @@ def find_basic_blocks(program: List[Instruction]):
 	blocks = [ii[1] for ii in sorted(bbs.items(), key=lambda ii: ii[0]) if len(ii[1].instrs) > 0]
 	return blocks
 
+def dot_cfg(blocks: List[BasicBlock]) -> str:
+	bb_names = { bb.name for bb in blocks}
+	assert len(bb_names) == len(blocks), "requires unique names"
+	def mk_node(bb: BasicBlock) -> str:
+		return f'\t{bb.name} [label="{bb.name}"];'
+	def mk_edges(bb : BasicBlock) -> List[str]:
+		return [f'{bb.name} -> {dst.name};'
+				for dst in bb.next]
+	dot = ["digraph g {"]
+	dot += [mk_node(bb) for bb in blocks]
+	for bb in blocks: dot += mk_edges(bb)
+	dot += ["}"]
+	return "\n".join(dot)
+
+def mk_dot(dot: str, filename: str, fmt=None):
+	if fmt is None:
+		fmt = os.path.splitext(filename)[1][1:]
+	with tempfile.NamedTemporaryFile('w', suffix='.dot', delete=False) as out:
+		out.write(dot)
+		dotfile = out.name
+	cmd = ['dot', '-T' + fmt, dotfile, '-o', filename]
+	#cmd = ['sfdp', '-x', '-Goverlap=scale', '-Gdpi=200', '-T' + fmt, dotfile, '-o', filename]
+	subprocess.run(cmd, check=True)
+	#subprocess.run(['cat', dotfile], check=True)
+
 def main():
 	if len(sys.argv) > 2:
 		print(f"{sys.argv[0]} [image.mem]")
@@ -271,7 +296,9 @@ def main():
 	with open(mem_file) as mem:
 		program = [disasm(BitVector(16, int(line.strip(), 16))) for line in mem]
 
-	find_basic_blocks(program)
+	bbs = find_basic_blocks(program)
+	mk_dot(dot_cfg(bbs), filename="cfg.pdf")
+	for bb in bbs: print(bb)
 
 	sys.exit(0)
 
