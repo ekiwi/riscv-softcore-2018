@@ -4,7 +4,8 @@
 import sys, os
 import kast
 from enum import Enum
-from typing import Optional
+from typing import Optional, List, Union
+from collections import defaultdict
 
 class Instruction(kast.Node):
 	pass
@@ -62,6 +63,18 @@ class Branch(Instruction):
 	offset = int
 class Jump(Instruction):
 	offset = int
+class BasicBlock:
+	def __init__(self, name: str):
+		self.name = name
+		self.instrs = []
+		self.next = []
+	def __str__(self):
+		to_str = ToString()
+		prog = "\n".join(to_str.visit(instr) for instr in self.instrs)
+		return f"{self.name}:\n{prog}"
+class ResolvedBranch(Instruction):
+	branch = Union[Skip, Jump, Branch]
+	targets = List[BasicBlock]
 
 # machine state
 
@@ -204,6 +217,47 @@ class ToString:
 	def visit_Jump(self, instr: Jump, addr: Optional[int] = None) -> str:
 			if addr is None: return f"rjmp 0x{instr.offset:04x}"
 			else:            return f"rjmp 0x{addr + 1 + instr.offset:04x}"
+	def visit_ResolvedBranch(self, instr: ResolvedBranch, _) -> str:
+		return f"{self.visit(instr.branch)} ; {' '.join(tt.name for tt in instr.targets)}"
+		#if isinstance(instr.branch, Skip):
+		#	return f"br{'s' if instr.branch.bit_is_one else 'c'} r{instr.branch.reg}, {instr.branch.bit}, {instr.targets[1].name}"
+
+def find_basic_blocks(program: List[Instruction]):
+	# identify branch targets and sources
+	targets = defaultdict(list)
+	branches = defaultdict(list)
+	def add_transition(src, offset):
+		dst = src + 1 + offset
+		targets[dst].append(src)
+		branches[src].append(dst)
+	for addr, instr in enumerate(program):
+		if isinstance(instr, Jump):
+			add_transition(addr, instr.offset)
+		elif isinstance(instr, Skip):
+			add_transition(addr, 0)
+			add_transition(addr, 1)
+		elif isinstance(instr, Branch):
+			add_transition(addr, 0)
+			add_transition(addr, instr.offset)
+	# create basic blocks
+	ii = -1
+	def make_bb():
+		nonlocal ii
+		ii += 1
+		return BasicBlock(f"bb{ii}")
+	bbs = defaultdict(make_bb)
+	bb = bbs[0]
+	for addr, instr in enumerate(program):
+		if addr in targets:
+			bb = bbs[addr]
+		if addr in branches:
+			tts = [bbs[dst] for dst in branches[addr]]
+			bb.instrs.append(ResolvedBranch(branch=instr, targets=tts))
+			bb.next = tts
+		else:
+			bb.instrs.append(instr)
+	blocks = [ii[1] for ii in sorted(bbs.items(), key=lambda ii: ii[0]) if len(ii[1].instrs) > 0]
+	return blocks
 
 def main():
 	if len(sys.argv) > 2:
@@ -215,13 +269,15 @@ def main():
 		mem_file = "../rv32i.mem"
 	to_str = ToString()
 	with open(mem_file) as mem:
-		addr = 0
-		for line in mem:
-			value = int(line.strip(), 16)
-			instr = disasm(BitVector(16, value))
-			mnemonic = to_str.visit(instr, addr)
-			print(f"{addr:04x}: {value:04x} {mnemonic}")
-			addr += 1
+		program = [disasm(BitVector(16, int(line.strip(), 16))) for line in mem]
+
+	find_basic_blocks(program)
+
+	sys.exit(0)
+
+	for addr, instr in enumerate(program):
+		mnemonic = to_str.visit(instr, addr)
+		print(f"{addr:04x}: {mnemonic}")
 
 
 if __name__ == '__main__':
