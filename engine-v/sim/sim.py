@@ -2,6 +2,66 @@
 # -*- coding: utf-8 -*-
 
 import sys, os
+import kast
+from enum import Enum
+from typing import Optional
+
+class Instruction(kast.Node):
+	pass
+class IO(Instruction):
+	output = bool
+	reg = int
+	fsr = int
+class AluOp(Enum):
+	Sbc = 0x2
+	Add = 0x3
+	Sub = 0x6
+	Adc = 0x7
+	And = 0x8
+	Xor = 0x9
+	Or = 0xa
+	Mov = 0xb
+class AluRegReg(Instruction):
+	op = AluOp
+	dst = int
+	src = int
+class AluImmOp(Enum):
+	Sub = 0x5
+	Or = 0x6
+	And = 0x7
+	Ld = 0xe
+class AluImm(Instruction):
+	op = AluImmOp
+	reg = int
+	imm = int
+class AluRegOp(Enum):
+	Swap = 0x2
+	Inc = 0x3
+	Asr = 0x5
+	Lsr = 0x6
+	Ror = 0x7
+	Dec = 0xa
+class AluReg(Instruction):
+	op = AluRegOp
+	reg = int
+class Skip(Instruction):
+	bit_is_one = bool
+	reg = int
+	bit = int
+class Mem(Instruction):
+	is_store = bool
+	reg = int
+	offset = int
+class BranchCond(Enum):
+	CS = 0b00
+	EQ = 0b01
+	CC = 0b10
+	NE = 0b11
+class Branch(Instruction):
+	cond = BranchCond
+	offset = int
+class Jump(Instruction):
+	offset = int
 
 # machine state
 
@@ -73,7 +133,7 @@ def cat(a: BitVector, b:BitVector) -> BitVector:
 
 def bv(bits: int, value: int) -> BitVector: return BitVector(bits=bits, value=value)
 
-def fsr(addr: BitVector) -> str:
+def fsr(addr: int) -> str:
 	map = {
 		0x00: 'UART_TX',
 		0x08: 'SPI_CS',
@@ -81,8 +141,7 @@ def fsr(addr: BitVector) -> str:
 		0x18: 'SPI_IO',
 		0x3f: 'FLAGS'
 	}
-	assert addr.value in map
-	return map[addr.value]
+	return map[addr]
 
 def signed(val: BitVector) -> int:
 	if val.bits < 2: return 0
@@ -91,65 +150,60 @@ def signed(val: BitVector) -> int:
 
 # funny: instruction set is very similar to AVR, some of the encoding is almost (?) the same
 # checkout https://www.microchip.com/webdoc/avrassembler/avrassembler.wb_instruction_list.html
-def disasm(instr: BitVector, addr: int) -> str:
-	# RJMP
-	if instr[15:12] == 0xC:
-		rel = signed(instr[11:0])
-		return f"rjmp 0x{addr + 1 + rel:04x}"
+def disasm(instr: BitVector) -> Instruction:
 	if instr[15:12] == 0xb:
-
-	if instr[15:12] == 0xb:
-		name = "out" if instr[11] == 1 else "in"
-		reg = instr[8:4] + 0
-		fsr_addr = cat(instr[9], instr[3:0])
-		return f"{name} r{reg}, {fsr(fsr_addr)}"
+		return IO(output = (instr[11] == 1), reg = instr[8:4] + 0, fsr = cat(instr[9], instr[3:0]) + 0)
 	# ALU REG
-	alu_ops = {
-		0x2: 'sbc', 0x3: 'add', 0x6: 'sub', 0x7: 'adc', 0x8: 'and', 0x9: 'xor', 0xa: 'or', 0xb: 'mov'
-	}
+	alu_ops = { op.value: op for op in AluOp }
 	if instr[15:10].value in alu_ops:
-		name = alu_ops[instr[15:10].value]
-		dst = instr[8:4] + 0
-		src = cat(instr[9], instr[3:0]) + 0
-		return f"{name} r{dst}, r{src}"
-	alu_imm_ops = {
-		0x7: 'andi', 0x6: 'ori', 0x5: 'subi', 0xe: 'ldi'
-	}
+		return AluRegReg(op = alu_ops[instr[15:10].value], dst = instr[8:4] + 0, src = cat(instr[9], instr[3:0]) + 0)
 	# ALU IMM
+	alu_imm_ops = { op.value: op for op in AluImmOp }
 	if instr[15:12].value in alu_imm_ops:
-		name = alu_imm_ops[instr[15:12].value]
-		reg = instr[7:4] + 16
-		imm = cat(instr[11:8], instr[3:0]) + 0
-		return f"{name} r{reg}, {imm}"
+		return AluImm(op = alu_imm_ops[instr[15:12].value], reg = instr[7:4] + 16, imm = cat(instr[11:8], instr[3:0]) + 0)
 	# SKIP
 	if instr[15:10] == 0x3f:
-		name = "sbrs" if instr[9] == 1 else "sbrc"
-		reg = instr[8:4] + 0
-		bit = instr[2:0] + 0
-		return f"{name} r{reg}, {bit}"
+		return Skip(bit_is_one = (instr[9] == 1), reg = instr[8:4] + 0, bit = instr[2:0] + 0)
 	# LD/ST
 	if instr[15:8].value & 0xd2 in [0x80, 0x82]:
-		reg = instr[8:4] + 0
-		is_st_not_ld = instr[8] == 1
-		offset = instr[1:0] + 0 # TODO: is this correct? what about xor?
-		if is_st_not_ld: return f"st Z+{offset}, r{reg}"
-		else:            return f"ld r{reg}, Z+{offset}"
+		offset = instr[1:0] + 0  # TODO: is this correct? what about xor?
+		return Mem(is_store = (instr[8] == 1), reg = instr[8:4] + 0, offset=offset)
 	# UOP
 	if instr[15:9] == 0x4a:
-		ops = {0x2: 'swap', 0x3: 'inc', 0x5: 'asr', 0x6: 'lsr', 0x7: 'ror', 0xa: 'dec'}
-		reg = instr[8:4] + 0
-		name = ops[instr[3:0] + 0]
-		return f"{name} r{reg}"
+		op = next(op for op in AluRegOp if op.value == (instr[3:0] + 0))
+		return AluReg(op = op, reg = instr[8:4] + 0)
+	# RJMP
+	if instr[15:12] == 0xC:
+		return Jump(offset = signed(instr[11:0]))
 	# BRANCH
 	if instr[15:11] == 0x1e and instr[2:1] == 0:
-		conds = { 0b00 : 'cs', 0b01: 'eq', 0b10: 'cc', 0b11: 'ne' }
-		cond = conds[cat(instr[10], instr[0]).value]
-		rel = signed(instr[10:3])
-		return f"br{cond} 0x{addr + 1 + rel:04x}"
-
-
-
+		cond = next(cc for cc in BranchCond if cc.value == (cat(instr[10], instr[0]) + 0))
+		return Branch(cond = cond, offset = signed(instr[10:3]))
 	assert False, f"unknown instruction: {instr}"
+
+class ToString:
+	def visit(self, node: Instruction, addr: Optional[int] = None) -> str:
+		method = 'visit_' + node.__class__.__name__
+		return getattr(self, method)(node, addr)
+	def visit_IO(self, instr: IO, _) -> str:
+		return f"{'out' if instr.output else 'in'} r{instr.reg}, {fsr(instr.fsr)}"
+	def visit_AluRegReg(self, instr: AluRegReg, _) -> str:
+		return f"{instr.op.name.lower()} r{instr.dst}, r{instr.src}"
+	def visit_AluImm(self, instr: AluImm, _) -> str:
+		return f"{instr.op.name.lower()}i r{instr.reg}, {instr.imm}"
+	def visit_AluReg(self, instr: AluReg, _) -> str:
+		return f"{instr.op.name.lower()} r{instr.reg}"
+	def visit_Skip(self, instr: Skip, _) -> str:
+		return f"sbr{'s' if instr.bit_is_one else 'c'} r{instr.reg}, {instr.bit}"
+	def visit_Mem(self, instr: Mem, _) -> str:
+		if instr.is_store: return f"st Z+{instr.offset}, r{instr.reg}"
+		else:              return f"ld r{instr.reg}, Z+{instr.offset}"
+	def visit_Branch(self, instr: Branch, addr: Optional[int] = None) -> str:
+		if addr is None: return f"br{instr.cond.name.lower()} 0x{instr.offset:04x}"
+		else:            return f"br{instr.cond.name.lower()} 0x{addr + 1 + instr.offset:04x}"
+	def visit_Jump(self, instr: Jump, addr: Optional[int] = None) -> str:
+			if addr is None: return f"rjmp 0x{instr.offset:04x}"
+			else:            return f"rjmp 0x{addr + 1 + instr.offset:04x}"
 
 def main():
 	if len(sys.argv) > 2:
@@ -159,11 +213,13 @@ def main():
 		mem_file = sys.argv[1]
 	else:
 		mem_file = "../rv32i.mem"
+	to_str = ToString()
 	with open(mem_file) as mem:
 		addr = 0
 		for line in mem:
 			value = int(line.strip(), 16)
-			mnemonic = disasm(BitVector(16, value), addr)
+			instr = disasm(BitVector(16, value))
+			mnemonic = to_str.visit(instr, addr)
 			print(f"{addr:04x}: {value:04x} {mnemonic}")
 			addr += 1
 
