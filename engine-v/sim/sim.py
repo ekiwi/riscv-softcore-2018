@@ -92,18 +92,18 @@ def signed(val: BitVector) -> int:
 # funny: instruction set is very similar to AVR, some of the encoding is almost (?) the same
 # checkout https://www.microchip.com/webdoc/avrassembler/avrassembler.wb_instruction_list.html
 def disasm(instr: BitVector, addr: int) -> str:
-	if instr[15:12] == 0xC: # RJMP
+	# RJMP
+	if instr[15:12] == 0xC:
 		rel = signed(instr[11:0])
 		return f"rjmp 0x{addr + 1 + rel:04x}"
-	if instr[15:11] == 0x17: # OUT
+	if instr[15:12] == 0xb:
+
+	if instr[15:12] == 0xb:
+		name = "out" if instr[11] == 1 else "in"
 		reg = instr[8:4] + 0
 		fsr_addr = cat(instr[9], instr[3:0])
-		return f"out r{reg}, {fsr(fsr_addr)}"
-	if instr[15:11] == 0x16: # IN
-		reg = instr[8:4] + 0
-		fsr_addr = cat(instr[9], instr[3:0])
-		return f"in r{reg}, {fsr(fsr_addr)}"
-	# ALU ops
+		return f"{name} r{reg}, {fsr(fsr_addr)}"
+	# ALU REG
 	alu_ops = {
 		0x2: 'sbc', 0x3: 'add', 0x6: 'sub', 0x7: 'adc', 0x8: 'and', 0x9: 'xor', 0xa: 'or', 0xb: 'mov'
 	}
@@ -115,27 +115,32 @@ def disasm(instr: BitVector, addr: int) -> str:
 	alu_imm_ops = {
 		0x7: 'andi', 0x6: 'ori', 0x5: 'subi', 0xe: 'ldi'
 	}
+	# ALU IMM
 	if instr[15:12].value in alu_imm_ops:
 		name = alu_imm_ops[instr[15:12].value]
 		reg = instr[7:4] + 16
 		imm = cat(instr[11:8], instr[3:0]) + 0
 		return f"{name} r{reg}, {imm}"
+	# SKIP
 	if instr[15:10] == 0x3f:
 		name = "sbrs" if instr[9] == 1 else "sbrc"
 		reg = instr[8:4] + 0
 		bit = instr[2:0] + 0
 		return f"{name} r{reg}, {bit}"
+	# LD/ST
 	if instr[15:8].value & 0xd2 in [0x80, 0x82]:
 		reg = instr[8:4] + 0
 		is_st_not_ld = instr[8] == 1
 		offset = instr[1:0] + 0 # TODO: is this correct? what about xor?
 		if is_st_not_ld: return f"st Z+{offset}, r{reg}"
 		else:            return f"ld r{reg}, Z+{offset}"
+	# UOP
 	if instr[15:9] == 0x4a:
 		ops = {0x2: 'swap', 0x3: 'inc', 0x5: 'asr', 0x6: 'lsr', 0x7: 'ror', 0xa: 'dec'}
 		reg = instr[8:4] + 0
 		name = ops[instr[3:0] + 0]
 		return f"{name} r{reg}"
+	# BRANCH
 	if instr[15:11] == 0x1e and instr[2:1] == 0:
 		conds = { 0b00 : 'cs', 0b01: 'eq', 0b10: 'cc', 0b11: 'ne' }
 		cond = conds[cat(instr[10], instr[0]).value]
