@@ -311,7 +311,7 @@ def load_program(filename) -> List[BasicBlock]:
 	return bbs
 
 def load_rv32_interpreter() -> List[BasicBlock]:
-	program = load_program("../rv32i.mem")
+	program = load_program("rv32i.mem")
 
 	# skip spi boot code
 	program = [program[0]] + program[11:]  # remove bb0 .. bb9
