@@ -191,7 +191,7 @@ def disasm(instr: BitVector) -> Instruction:
 	# BRANCH
 	if instr[15:11] == 0x1e and instr[2:1] == 0:
 		cond = next(cc for cc in BranchCond if cc.value == (cat(instr[10], instr[0]) + 0))
-		return Branch(cond = cond, offset = signed(instr[10:3]))
+		return Branch(cond = cond, offset = signed(instr[9:3]))
 	assert False, f"unknown instruction: {instr}"
 
 class ToString:
