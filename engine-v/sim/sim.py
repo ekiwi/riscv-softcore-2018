@@ -300,32 +300,36 @@ def mk_dot(dot: str, filename: str, fmt=None):
 	subprocess.run(cmd, check=True)
 	#subprocess.run(['cat', dotfile], check=True)
 
-def main():
-	if len(sys.argv) > 2:
-		print(f"{sys.argv[0]} [image.mem]")
-		sys.exit(1)
-	elif len(sys.argv) == 2:
-		mem_file = sys.argv[1]
-	else:
-		mem_file = "../rv32i.mem"
-	to_str = ToString()
-	with open(mem_file) as mem:
+def load_program(filename) -> List[BasicBlock]:
+	with open(filename) as mem:
 		program = []
 		for addr, line in enumerate(mem):
 			instr = BitVector(16, int(line.strip(), 16))
 			# program.append(disasm(instr))
 			program.append(dbg_disasm(instr, addr))
-
 	bbs = find_basic_blocks(program)
-	mk_dot(dot_cfg(bbs), filename="cfg.pdf")
-	for bb in bbs: print(bb)
+	return bbs
+
+def load_rv32_interpreter() -> List[BasicBlock]:
+	program = load_program("../rv32i.mem")
+
+	# skip spi boot code
+	program = [program[0]] + program[11:]  # remove bb0 .. bb9
+	program[0].next = [program[1]]
+	program[0].instrs = program[0].instrs[0:4]  # keep init code
+	program[1].instrs = program[1].instrs[1:]  # remove some SPI code
+
+	return program
+
+
+def analyze_rv32_interpreter(program: List[BasicBlock]):
+	print("analyzing rv32 interpreter ...")
+
+	mk_dot(dot_cfg(program), filename="cfg.pdf")
+	for bb in program: print(bb)
 
 	return
 
-	for addr, instr in enumerate(program):
-		mnemonic = to_str.visit(instr, addr)
-		print(f"{addr:04x}: {mnemonic}")
-
-
 if __name__ == '__main__':
-	main()
+	pp = load_rv32_interpreter()
+	analyze_rv32_interpreter(pp)
