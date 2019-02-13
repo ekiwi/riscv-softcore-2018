@@ -8,7 +8,7 @@ from typing import Optional, List, Union
 from collections import defaultdict
 
 class Instruction(kast.Node):
-	pass
+	meta = Optional[str]
 class IO(Instruction):
 	output = bool
 	reg = int
@@ -194,10 +194,18 @@ def disasm(instr: BitVector) -> Instruction:
 		return Branch(cond = cond, offset = signed(instr[9:3]))
 	assert False, f"unknown instruction: {instr}"
 
+def dbg_disasm(instr: BitVector, addr: int) -> Instruction:
+	meta = f"{addr:04x}: {instr.value:04x}"
+	return disasm(instr).set(meta=meta)
+
 class ToString:
 	def visit(self, node: Instruction, addr: Optional[int] = None) -> str:
 		method = 'visit_' + node.__class__.__name__
-		return getattr(self, method)(node, addr)
+		string = getattr(self, method)(node, addr)
+		if node.meta is not None:
+			return string + " \t\t;" + node.meta
+		else:
+			return string
 	def visit_IO(self, instr: IO, _) -> str:
 		return f"{'out' if instr.output else 'in'} r{instr.reg}, {fsr(instr.fsr)}"
 	def visit_AluRegReg(self, instr: AluRegReg, _) -> str:
@@ -240,16 +248,17 @@ def find_basic_blocks(program: List[Instruction]):
 			add_transition(addr, 0)
 			add_transition(addr, instr.offset)
 	# create basic blocks
-	ii = -1
-	def make_bb():
-		nonlocal ii
-		ii += 1
-		return BasicBlock(f"bb{ii}")
-	bbs = defaultdict(make_bb)
+	bbs = defaultdict(lambda : BasicBlock("bb_na"))
 	bb = bbs[0]
+	bb.name = "entry"
+	ii = 0
 	for addr, instr in enumerate(program):
 		if addr in targets:
+			if len(bb.next) == 0: # bbs that are fall through
+				bb.next = [bbs[addr]]
 			bb = bbs[addr]
+			bb.name = f"bb{ii}"
+			ii += 1
 		if addr in branches:
 			tts = [bbs[dst] for dst in branches[addr]]
 			bb.instrs.append(ResolvedBranch(branch=instr, targets=tts))
@@ -257,6 +266,13 @@ def find_basic_blocks(program: List[Instruction]):
 		else:
 			bb.instrs.append(instr)
 	blocks = [ii[1] for ii in sorted(bbs.items(), key=lambda ii: ii[0]) if len(ii[1].instrs) > 0]
+	# sanity check blocks:
+	for ii, block in enumerate(blocks):
+		last = block.instrs[-1]
+		if isinstance(last, ResolvedBranch):
+			assert last.targets == block.next
+		else:
+			assert block.next == [blocks[ii+1]]
 	return blocks
 
 def dot_cfg(blocks: List[BasicBlock]) -> str:
@@ -294,13 +310,17 @@ def main():
 		mem_file = "../rv32i.mem"
 	to_str = ToString()
 	with open(mem_file) as mem:
-		program = [disasm(BitVector(16, int(line.strip(), 16))) for line in mem]
+		program = []
+		for addr, line in enumerate(mem):
+			instr = BitVector(16, int(line.strip(), 16))
+			# program.append(disasm(instr))
+			program.append(dbg_disasm(instr, addr))
 
 	bbs = find_basic_blocks(program)
 	mk_dot(dot_cfg(bbs), filename="cfg.pdf")
 	for bb in bbs: print(bb)
 
-	sys.exit(0)
+	return
 
 	for addr, instr in enumerate(program):
 		mnemonic = to_str.visit(instr, addr)
