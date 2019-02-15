@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 import kast
 from enum import Enum
-from typing import Optional, List, Union
+from typing import Optional, List, Union, Tuple
 from collections import defaultdict
 
 from bv import BitVector, cat
@@ -76,15 +76,6 @@ class BasicBlock:
 class ResolvedBranch(Instruction):
 	branch = Union[Skip, Jump, Branch]
 	targets = List[BasicBlock]
-
-# machine state
-
-class MachineState:
-	pass
-	# FPC : bv<16>
-	# Frunning : bool
-	# REG : bv<8> [32]
-	# RAM : bv<8> [0xffff]
 
 def fsr(addr: int) -> str:
 	map = {
@@ -215,7 +206,7 @@ def find_basic_blocks(program: List[Instruction]):
 			assert block.next == [blocks[ii+1]]
 	return blocks
 
-def load_program(filename) -> List[BasicBlock]:
+def load_program(filename) -> Tuple[List[Instruction], List[BasicBlock]]:
 	with open(filename) as mem:
 		program = []
 		for addr, line in enumerate(mem):
@@ -223,4 +214,167 @@ def load_program(filename) -> List[BasicBlock]:
 			# program.append(disasm(instr))
 			program.append(dbg_disasm(instr, addr))
 	bbs = find_basic_blocks(program)
-	return bbs
+	return program, bbs
+
+# symexec stuff
+from pysmt.shortcuts import Symbol, BVType, BV, BVAdd, BVSub, BVZExt, BVAnd, BVOr, BVXor, BVConcat, BVComp, BVExtract, ArrayType, Select, Store, Equals, Ite, simplify
+
+def BitVecVal(val: int, width: int): return BV(val, width)
+def BitVec(name: str, width: int): return Symbol(name, BVType(width))
+
+# TODO: this currently implements AVR semantics ... we might need to adjust this model as we learn more about
+#       the correct MF8 semantics
+# TODO: for now this will only support 100% concrete instructions!
+#       only state can be symbolic!
+
+# machine state
+
+bv8_t  = BVType(8)
+bv16_t = BVType(16)
+bv32_t = BVType(32)
+bv16_1 = BitVecVal(1, 16)
+
+class ConcreteAddrMem:
+	def __init__(self, prefix, suffix, typ, size, _data=None):
+		self.prefix = prefix
+		if _data is None:
+			self._data = [Symbol(f'{prefix}{ii}{suffix}', typ) for ii in range(size)]
+		else:
+			self._data = _data
+	def update(self, index, value):
+		assert isinstance(index, int), f"memory '{self.prefix}' requires a constant address not: `{index}`"
+		assert len(self._data) > index >=0
+		new_data = self._data[0:index] + [value] + self._data[index+1:]
+		return ConcreteAddrMem(self.prefix, suffix='', typ=None, size=None, _data=new_data)
+	def __getitem__(self, item):
+		return self._data[item]
+
+class MachineState:
+	def __init__(self, suffix='_prev'):
+		# TODO: remove terrible hack!
+		if suffix is not None:
+			self._pc = BitVec('MF8_PC' + suffix, 16)
+			self._r = ConcreteAddrMem('MF8_R',  suffix, bv8_t, 32)
+			self._mem = Symbol('MF8_MEM' + suffix, ArrayType(bv16_t, bv8_t))
+			self._c = BitVec('MF8_C'+suffix, 1)
+			self._z = BitVec('MF8_Z' + suffix, 1)
+		else:
+			self._pc = None
+			self._r = None
+			self._mem = None
+			self._c = None
+			self._z = None
+	@property
+	def PC(self): return self._pc
+	@property
+	def R(self): return self._r
+	@property
+	def MEM(self): return self._mem
+	@property
+	def C(self): return self._c
+	@property
+	def Z(self): return self._z
+	@property
+	def SREG(self): return BVZExt(BVConcat(self._z, self._c), 6)
+	def update(self, **kwars) -> "MachineState":
+		arg_names = {'PC', 'R', 'MEM', 'C', 'Z'}
+		for name in kwars.keys():
+			assert name in arg_names
+		st = MachineState()
+		for name in arg_names:
+			attr = f"_{name.lower()}"
+			val = kwars.get(name, self.__getattribute__(attr))
+			st.__setattr__(attr, val)
+		return st
+	def __str__(self):
+		# TODO: nicer output with register table
+		lines = [
+			"MF8 Machine State:",
+			f"PC: {self.PC}",
+			*[f"R{ii: 2}: {reg}" for ii, reg in enumerate(self.R._data)],
+			f"Z: {self.Z}, C: {self.C}",
+			f"MEM: {self.MEM}"
+		]
+		return "\n".join(lines)
+	def __repr__(self): return str(self)
+
+class SymExec:
+	def exec(self, instr: Instruction, state):
+		method = 'exec_' + instr.__class__.__name__
+		update = getattr(self, method)(instr, state)
+		return update
+	def visit_IO(self, instr: IO, _):
+		raise RuntimeError(f"IO instructions not supported! {instr}")
+	@staticmethod
+	def _arith(op, a, b, c):
+		a9, b9, c9 = BVZExt(a, 1), BVZExt(b, 1), BVZExt(c, 8)
+		op = {AluImmOp.Sub: AluOp.Sub}.get(op, op)
+		res = {
+			AluOp.Adc: lambda: BVAdd(BVAdd(a9, b9), c9),
+			AluOp.Add: lambda: BVAdd(a9, b9),
+			AluOp.Sbc: lambda: BVSub(BVSub(a9, b9), c9),
+			AluOp.Sub: lambda: BVSub(a9, b9),
+		}[op]()
+		res8 = BVExtract(res, 7, 0)
+		z = BVComp(res8, BitVecVal(0, 8))
+		c = BVExtract(res, 8, 8)
+		return res8, z, c
+	@staticmethod
+	def _bitop(op, a, b, c):
+		op = {AluImmOp.And: AluOp.And, AluImmOp.Ld: AluOp.Mov, AluImmOp.Or: AluOp.Or}.get(op, op)
+		res = {
+			AluOp.And: lambda: BVAnd(a, b),
+			AluOp.Or:  lambda: BVOr(a, b),
+			AluOp.Xor: lambda: BVXor(a, b),
+			AluOp.Mov: lambda: b
+		}[op]()
+		z = BVComp(res, BitVecVal(0, 8))
+		return res, z, c
+	@staticmethod
+	def _alu(op, a, b, c):
+		if op in {AluOp.Adc, AluOp.Add, AluOp.Sbc, AluOp.Sub}:
+			return SymExec._arith(op, a, b, c)
+		return SymExec._bitop(op, a, b, c)
+	def exec_AluRegReg(self, instr: AluRegReg, st):
+		dst, src = st.R[instr.dst], st.R[instr.src]
+		res, z, c = SymExec._alu(instr.op, dst, src, st.C)
+		return st.update(R=st.R.update(instr.dst, res), Z=z, C=c, PC=BVAdd(st.PC, bv16_1))
+	def exec_AluImm(self, instr: AluImm, st) -> str:
+		dst, src = st.R[instr.reg], BitVecVal(instr.imm, 8)
+		res, z, c = SymExec._alu(instr.op, dst, src, st.C)
+		return st.update(R=st.R.update(instr.reg, res), Z=z, C=c, PC=BVAdd(st.PC, bv16_1))
+	def exec_AluReg(self, instr: AluReg, _):
+		raise RuntimeError("TODO: implement AluReg instruction")
+	def exec_Skip(self, instr: Skip, st):
+		bit = BVExtract(st.R[instr.reg], instr.bit, instr.bit)
+		taken = Equals(bit, BitVecVal(int(instr.bit_is_one), 1))
+		pc = BVAdd(st.PC, Ite(taken, BitVecVal(2, 16), bv16_1))
+		return st.update(PC=pc)
+	def exec_Mem(self, instr: Mem, st) -> str:
+		ZReg = BVConcat(st.R[31], st.R[30])
+		if instr.offset >= 0:
+			loc = BVAdd(ZReg, BitVecVal(instr.offset, 16))
+		else:
+			loc = BVSub(ZReg, BitVecVal(-instr.offset, 16))
+		if instr.is_store: return st.update(MEM = Store(st.MEM, loc, st.R[instr.reg]))
+		else:              return st.update(R = st.R.update(instr.reg, Select(st.MEM, loc)))
+	def exec_Branch(self, instr: Branch, st):
+		taken = {
+			BranchCond.CC: lambda: Equals(st.C, BitVecVal(0, 1)),
+			BranchCond.CS: lambda: Equals(st.C, BitVecVal(1, 1)),
+			BranchCond.EQ: lambda: Equals(st.Z, BitVecVal(1, 1)),
+			BranchCond.NE: lambda: Equals(st.Z, BitVecVal(0, 1)),
+		}[instr.cond]()
+		if instr.offset >= 0:
+			taken_pc = BVAdd(st.pc, BitVecVal(instr.offset + 1, 16))
+		else:
+			taken_pc = BVSub(st.pc, BitVecVal(-instr.offset + 1, 16))
+		return Ite(taken, taken_pc, BVAdd(st.pc, bv16_1))
+	def exec_Jump(self, instr: Jump, st) -> str:
+			if instr.offset >= 0:
+				pc = BVAdd(st.pc, BitVecVal(instr.offset + 1, 16))
+			else:
+				pc = BVSub(st.pc, BitVecVal(-instr.offset + 1, 16))
+			return st.update(PC=pc)
+	def exec_ResolvedBranch(self, instr: ResolvedBranch, _) -> str:
+		raise RuntimeError("ResolvedBranches and basic blocks are not supported for symbolic execution")
