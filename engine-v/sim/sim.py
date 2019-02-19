@@ -5,7 +5,12 @@ import sys, os, tempfile, subprocess
 from typing import Optional, List, Union, Tuple
 
 from mf8 import BasicBlock, load_program, MachineState, SymExec, Instruction, BitVecVal
-from pysmt.shortcuts import simplify, Symbol, BVType, BVExtract
+from pysmt.shortcuts import simplify, Symbol, BVType, BVExtract, BVConcat, to_smtlib
+from functools import reduce
+
+
+def cat(*vargs):
+	return reduce(BVConcat, vargs)
 
 def dot_cfg(blocks: List[BasicBlock]) -> str:
 	bb_names = { bb.name for bb in blocks}
@@ -52,8 +57,16 @@ def analyze_rv32_interpreter(program: List[Instruction], bbs: List[BasicBlock]):
 
 	# start at MainStart @ 0x0056
 	start_pc = 0x56
-	# symbolic instruction
-	RV32I_instr = Symbol("RV32IInstruction", BVType(32))
+	# symbolic instruction: ADD rs2, rs1, rd
+	funct7 = BitVecVal(0, 7)
+	rs2 = Symbol("RV32I_ADD_rs2", BVType(5))
+	rs1 = Symbol("RV32I_ADD_rs1", BVType(5))
+	funct3 = BitVecVal(0b00, 3) # ADD
+	rd = Symbol("RV32I_ADD_rd", BVType(5))
+	opcode = BitVecVal(0b0110011, 7) # OP
+	#RV32I_instr = Symbol("RV32IInstruction", BVType(32))
+	RV32I_instr = cat(funct7, rs2, rs1, funct3, rd, opcode)
+	print(f"Symbolically executing: {RV32I_instr}")
 
 	# interpreter
 	orig_state = MachineState().update(PC=BitVecVal(start_pc, 16))
@@ -90,8 +103,10 @@ def analyze_rv32_interpreter(program: List[Instruction], bbs: List[BasicBlock]):
 	print("--------")
 	st = orig_state
 
-	for ii in range(8):
+	for ii in range(9):
 		st = step(st)
+
+	print(f"PC: {st.PC.serialize()}")
 
 	print(st.simplify())
 
