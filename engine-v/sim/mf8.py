@@ -4,6 +4,7 @@ import kast
 from enum import Enum
 from typing import Optional, List, Union, Tuple
 from collections import defaultdict
+from functools import reduce
 
 from bv import BitVector, cat
 
@@ -249,24 +250,43 @@ class ConcreteAddrMem:
 	def __getitem__(self, item):
 		return self._data[item]
 
+def make_bv(val, typ):
+	if isinstance(val, int):
+		val = BV(val, typ.width)
+	assert val.get_type() == typ
+	return val
+
+def definitely_alias(a, b):
+	return simplify(Equals(a, b)).is_true()
+def may_alias(a, b):
+	return not simplify(Equals(a, b)).is_false()
+
 class SymbolicAddrMem:
-	def __init__(self, name, addr_typ, data_typ, _data=None):
+	def __init__(self, name, addr_typ, data_typ, data=None):
 		assert addr_typ.is_bv_type()
 		self._addr_typ = addr_typ
-		if _data is None:
-			self._data = Symbol(name, ArrayType(addr_typ, data_typ))
-		else:
-			self._data = _data
-	def _index(self, ii):
-		if isinstance(ii, int):
-			return BitVecVal(ii, self._addr_typ.width)
-		else:
-			return ii
+		self._data_typ = data_typ
+		self._name = name
+		self._data = [] if data is None else data
 	def update(self, index, value):
-		new_data = Store(self._data, self._index(index), value)
-		return SymbolicAddrMem(name=None, addr_typ=self._addr_typ, data_typ=None, _data=new_data)
+		index, value = make_bv(index, self._addr_typ), make_bv(value, self._data_typ)
+		# filter all definite aliases, as they will be overwritten
+		data = [dd for dd in self._data if not definitely_alias(dd[0], index)]
+		data += [(index, value)]
+		return SymbolicAddrMem(name=self._name, addr_typ=self._addr_typ, data_typ=self._data_typ, data=data)
 	def __getitem__(self, index):
-		return Select(self._data, self._index(index))
+		index = make_bv(index, self._addr_typ)
+		# try to find a sure alias, stop when there might be an alias
+		for entry in reversed(self._data):
+			if definitely_alias(entry[0], index):
+				return entry[1]
+			if may_alias(entry[0], index):
+				break
+		# collect all possible aliases, create array and return
+		possible_aliases = [dd for dd in self._data if may_alias(dd[0], index)]
+		array = Symbol(self._name, ArrayType(self._addr_typ, self._data_typ))
+		array = reduce(lambda aa, dd: Store(aa, *dd), array)
+		return Select(array, index)
 	def __str__(self): return str(self._data)
 
 class MachineState:
