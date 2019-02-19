@@ -4,7 +4,8 @@
 import sys, os, tempfile, subprocess
 from typing import Optional, List, Union, Tuple
 
-from mf8 import BasicBlock, load_program, MachineState, SymExec, Instruction, BitVecVal, simplify
+from mf8 import BasicBlock, load_program, MachineState, SymExec, Instruction, BitVecVal
+from pysmt.shortcuts import simplify, Symbol, BVType, BVExtract
 
 def dot_cfg(blocks: List[BasicBlock]) -> str:
 	bb_names = { bb.name for bb in blocks}
@@ -51,10 +52,28 @@ def analyze_rv32_interpreter(program: List[Instruction], bbs: List[BasicBlock]):
 
 	# start at MainStart @ 0x0056
 	start_pc = 0x56
-
+	# symbolic instruction
+	RV32I_instr = Symbol("RV32IInstruction", BVType(32))
 
 	# interpreter
 	orig_state = MachineState().update(PC=BitVecVal(start_pc, 16))
+	def place_instr(loc, instr, st) -> MachineState:
+		# make sure PC fits into two registers
+		assert loc & 0xffff == loc
+		msb, lsb = BitVecVal(loc >> 8, 8), BitVecVal(loc & 0xff, 8)
+		st = st.update(R=st.R.update(10, lsb).update(11, msb))
+		instr_parts = [BVExtract(instr, *jj) for jj in ((jj*8, jj*8+7) for jj in range(4))]
+		if isinstance(loc, int):
+			instr_locs = [loc+ii for ii in range(4)]
+		else:
+			assert False, "TODO: support symbolic address"
+		# TODO: update mem!
+		mem = st.MEM
+		for loc, val in zip(instr_locs, instr_parts):
+			mem = mem.update(loc, val)
+		return st.update(MEM = mem)
+	orig_state = place_instr(loc=0, instr=RV32I_instr, st=orig_state)
+
 	ex = SymExec()
 
 	def step(st) -> MachineState:
@@ -71,9 +90,10 @@ def analyze_rv32_interpreter(program: List[Instruction], bbs: List[BasicBlock]):
 	print("--------")
 	st = orig_state
 
-	for ii in range(5):
+	for ii in range(8):
 		st = step(st)
-	print(st)
+
+	print(st.simplify())
 
 
 	return

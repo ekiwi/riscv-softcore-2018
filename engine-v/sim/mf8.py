@@ -217,7 +217,7 @@ def load_program(filename) -> Tuple[List[Instruction], List[BasicBlock]]:
 	return program, bbs
 
 # symexec stuff
-from pysmt.shortcuts import Symbol, BVType, BV, BVAdd, BVSub, BVZExt, BVAnd, BVOr, BVXor, BVConcat, BVComp, BVExtract, ArrayType, Select, Store, Equals, Ite, simplify
+from pysmt.shortcuts import Symbol, BVType, BV, BVAdd, BVSub, BVZExt, BVAnd, BVOr, BVXor, BVConcat, BVComp, BVExtract, ArrayType, Select, Store, Equals, Ite, simplify, to_smtlib
 
 def BitVecVal(val: int, width: int): return BV(val, width)
 def BitVec(name: str, width: int): return Symbol(name, BVType(width))
@@ -249,13 +249,33 @@ class ConcreteAddrMem:
 	def __getitem__(self, item):
 		return self._data[item]
 
+class SymbolicAddrMem:
+	def __init__(self, name, addr_typ, data_typ, _data=None):
+		assert addr_typ.is_bv_type()
+		self._addr_typ = addr_typ
+		if _data is None:
+			self._data = Symbol(name, ArrayType(addr_typ, data_typ))
+		else:
+			self._data = _data
+	def _index(self, ii):
+		if isinstance(ii, int):
+			return BitVecVal(ii, self._addr_typ.width)
+		else:
+			return ii
+	def update(self, index, value):
+		new_data = Store(self._data, self._index(index), value)
+		return SymbolicAddrMem(name=None, addr_typ=self._addr_typ, data_typ=None, _data=new_data)
+	def __getitem__(self, index):
+		return Select(self._data, self._index(index))
+	def __str__(self): return str(self._data)
+
 class MachineState:
 	def __init__(self, suffix='_prev'):
 		# TODO: remove terrible hack!
 		if suffix is not None:
 			self._pc = BitVec('MF8_PC' + suffix, 16)
 			self._r = ConcreteAddrMem('MF8_R',  suffix, bv8_t, 32)
-			self._mem = Symbol('MF8_MEM' + suffix, ArrayType(bv16_t, bv8_t))
+			self._mem = SymbolicAddrMem('MF8_MEM' + suffix, bv16_t, bv8_t)
 			self._c = BitVec('MF8_C'+suffix, 1)
 			self._z = BitVec('MF8_Z' + suffix, 1)
 		else:
@@ -286,6 +306,17 @@ class MachineState:
 			val = kwars.get(name, self.__getattribute__(attr))
 			st.__setattr__(attr, val)
 		return st
+	def simplify(self) -> "MachineState":
+		arg_names = {'PC', 'R', 'MEM', 'C', 'Z'}
+		st = MachineState()
+		for attr in ['_pc', '_c', '_z']:
+			st.__setattr__(attr, simplify(self.__getattribute__(attr)))
+		st._mem._data = simplify(self._mem._data)
+		st._mem._addr_typ = self._mem._addr_typ
+		st._r._data = [simplify(rr) for rr in self._r._data]
+		st._r.prefix = self._r.prefix
+		return st
+
 	def __str__(self):
 		# TODO: nicer output with register table
 		lines = [
@@ -318,7 +349,7 @@ class SymExec:
 			AluOp.Sbc: lambda: BVSub(BVSub(a9, b9), c9),
 			AluOp.Sub: lambda: BVSub(a9, b9),
 		}[op]()
-		res8 = BVExtract(res, 7, 0)
+		res8 = BVExtract(res, 0, 7)
 		z = BVComp(res8, BitVecVal(0, 8))
 		c = BVExtract(res, 8, 8)
 		return res8, z, c
@@ -359,8 +390,8 @@ class SymExec:
 			loc = BVAdd(ZReg, BitVecVal(instr.offset, 16))
 		else:
 			loc = BVSub(ZReg, BitVecVal(-instr.offset, 16))
-		if instr.is_store: return st.update(MEM = Store(st.MEM, loc, st.R[instr.reg]))
-		else:              return st.update(R = st.R.update(instr.reg, Select(st.MEM, loc)))
+		if instr.is_store: return st.update(MEM = st.MEM.update(loc, st.R[instr.reg]))
+		else:              return st.update(R = st.R.update(instr.reg, st.MEM[loc]))
 	def exec_Branch(self, instr: Branch, st):
 		taken = {
 			BranchCond.CC: lambda: Equals(st.C, BitVecVal(0, 1)),
