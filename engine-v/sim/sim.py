@@ -5,8 +5,11 @@ import sys, os, tempfile, subprocess
 from typing import Optional, List, Union, Tuple
 
 from mf8 import BasicBlock, load_program, MachineState, SymExec, Instruction, BitVecVal
-from pysmt.shortcuts import simplify, Symbol, BVType, BVExtract, BVConcat, to_smtlib
+from pysmt.shortcuts import Symbol, BVType, BVExtract, BVConcat
+from sym import simplify
+
 from functools import reduce
+
 
 
 def cat(*vargs):
@@ -90,8 +93,9 @@ def analyze_rv32_interpreter(program: List[Instruction], bbs: List[BasicBlock]):
 	ex = SymExec()
 
 	def step(st) -> MachineState:
+		print(st.PC.serialize())
 		st = st.update(PC=simplify(st.PC))
-		assert st.PC.is_constant(), f"PC: {st.PC}"
+		assert st.PC.is_constant(), f"PC: {st.PC.serialize()}"
 		pc_concrete = st.PC.bv_unsigned_value()
 		instr = program[pc_concrete]
 		print(f"Step: {pc_concrete:04x} {instr}")
@@ -103,10 +107,10 @@ def analyze_rv32_interpreter(program: List[Instruction], bbs: List[BasicBlock]):
 	print("--------")
 	st = orig_state
 
-	for ii in range(9):
+	for ii in range(10):
 		st = step(st)
 
-	print(f"PC: {st.PC.serialize()}")
+	print(f"PC: {simplify(st.PC).serialize()}")
 
 	print(st.simplify())
 

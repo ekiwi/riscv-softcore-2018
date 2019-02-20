@@ -218,7 +218,8 @@ def load_program(filename) -> Tuple[List[Instruction], List[BasicBlock]]:
 	return program, bbs
 
 # symexec stuff
-from pysmt.shortcuts import Symbol, BVType, BV, BVAdd, BVSub, BVZExt, BVAnd, BVOr, BVXor, BVConcat, BVComp, BVExtract, ArrayType, Select, Store, Equals, Ite, simplify, to_smtlib
+from pysmt.shortcuts import Symbol, BVType, BV, BVAdd, BVSub, BVZExt, BVAnd, BVOr, BVXor, BVConcat, BVComp, BVExtract, Equals, Ite
+from sym import simplify, ConcreteAddrMem, SymbolicAddrMem
 
 def BitVecVal(val: int, width: int): return BV(val, width)
 def BitVec(name: str, width: int): return Symbol(name, BVType(width))
@@ -234,60 +235,6 @@ bv8_t  = BVType(8)
 bv16_t = BVType(16)
 bv32_t = BVType(32)
 bv16_1 = BitVecVal(1, 16)
-
-class ConcreteAddrMem:
-	def __init__(self, prefix, suffix, typ, size, _data=None):
-		self.prefix = prefix
-		if _data is None:
-			self._data = [Symbol(f'{prefix}{ii}{suffix}', typ) for ii in range(size)]
-		else:
-			self._data = _data
-	def update(self, index, value):
-		assert isinstance(index, int), f"memory '{self.prefix}' requires a constant address not: `{index}`"
-		assert len(self._data) > index >=0
-		new_data = self._data[0:index] + [value] + self._data[index+1:]
-		return ConcreteAddrMem(self.prefix, suffix='', typ=None, size=None, _data=new_data)
-	def __getitem__(self, item):
-		return self._data[item]
-
-def make_bv(val, typ):
-	if isinstance(val, int):
-		val = BV(val, typ.width)
-	assert val.get_type() == typ
-	return val
-
-def definitely_alias(a, b):
-	return simplify(Equals(a, b)).is_true()
-def may_alias(a, b):
-	return not simplify(Equals(a, b)).is_false()
-
-class SymbolicAddrMem:
-	def __init__(self, name, addr_typ, data_typ, data=None):
-		assert addr_typ.is_bv_type()
-		self._addr_typ = addr_typ
-		self._data_typ = data_typ
-		self._name = name
-		self._data = [] if data is None else data
-	def update(self, index, value):
-		index, value = make_bv(index, self._addr_typ), make_bv(value, self._data_typ)
-		# filter all definite aliases, as they will be overwritten
-		data = [dd for dd in self._data if not definitely_alias(dd[0], index)]
-		data += [(index, value)]
-		return SymbolicAddrMem(name=self._name, addr_typ=self._addr_typ, data_typ=self._data_typ, data=data)
-	def __getitem__(self, index):
-		index = make_bv(index, self._addr_typ)
-		# try to find a sure alias, stop when there might be an alias
-		for entry in reversed(self._data):
-			if definitely_alias(entry[0], index):
-				return entry[1]
-			if may_alias(entry[0], index):
-				break
-		# collect all possible aliases, create array and return
-		possible_aliases = [dd for dd in self._data if may_alias(dd[0], index)]
-		array = Symbol(self._name, ArrayType(self._addr_typ, self._data_typ))
-		array = reduce(lambda aa, dd: Store(aa, *dd), array)
-		return Select(array, index)
-	def __str__(self): return str(self._data)
 
 class MachineState:
 	def __init__(self, suffix='_prev'):
@@ -331,7 +278,7 @@ class MachineState:
 		st = MachineState()
 		for attr in ['_pc', '_c', '_z']:
 			st.__setattr__(attr, simplify(self.__getattribute__(attr)))
-		st._mem._data = simplify(self._mem._data)
+		st._mem._data = simplify(self._mem.array())
 		st._mem._addr_typ = self._mem._addr_typ
 		st._r._data = [simplify(rr) for rr in self._r._data]
 		st._r.prefix = self._r.prefix
