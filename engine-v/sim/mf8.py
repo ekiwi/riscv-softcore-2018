@@ -70,6 +70,7 @@ class BasicBlock:
 		self.name = name
 		self.instrs = []
 		self.next = []
+		self.priority = -1	# will carry a valid value after topological sort
 	def __str__(self):
 		to_str = ToString()
 		prog = "\n".join(to_str.visit(instr) for instr in self.instrs)
@@ -207,6 +208,18 @@ def find_basic_blocks(program: List[Instruction]):
 			assert block.next == [blocks[ii+1]]
 	return blocks
 
+def topo_sort_bbs(entry: BasicBlock):
+	seen = set()
+	res = []
+	def visit(node):
+		if node in seen or node in res: return
+		seen.add(node)
+		for bb in node.next: visit(bb)
+		res.append(node)
+	visit(entry)
+	for ii, bb in enumerate(list(reversed(res))):
+		bb.priority = ii
+
 def load_program(filename) -> Tuple[List[Instruction], List[BasicBlock]]:
 	with open(filename) as mem:
 		program = []
@@ -215,6 +228,7 @@ def load_program(filename) -> Tuple[List[Instruction], List[BasicBlock]]:
 			# program.append(disasm(instr))
 			program.append(dbg_disasm(instr, addr))
 	bbs = find_basic_blocks(program)
+	topo_sort_bbs(bbs[0])
 	return program, bbs
 
 # symexec stuff

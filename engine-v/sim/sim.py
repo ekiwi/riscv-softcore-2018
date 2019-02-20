@@ -19,7 +19,7 @@ def dot_cfg(blocks: List[BasicBlock]) -> str:
 	bb_names = { bb.name for bb in blocks}
 	assert len(bb_names) == len(blocks), "requires unique names"
 	def mk_node(bb: BasicBlock) -> str:
-		return f'\t{bb.name} [label="{bb.name}"];'
+		return f'\t{bb.name} [label="{bb.name} ({bb.priority})"];'
 	def mk_edges(bb : BasicBlock) -> List[str]:
 		return [f'{bb.name} -> {dst.name};'
 				for dst in bb.next]
@@ -55,6 +55,7 @@ def load_rv32_interpreter() -> Tuple[List[Instruction], List[BasicBlock]]:
 def analyze_rv32_interpreter(program: List[Instruction], bbs: List[BasicBlock]):
 	print("analyzing rv32 interpreter ...")
 
+
 	mk_dot(dot_cfg(bbs), filename="cfg.pdf")
 	for bb in program: print(bb)
 
@@ -83,7 +84,6 @@ def analyze_rv32_interpreter(program: List[Instruction], bbs: List[BasicBlock]):
 			instr_locs = [loc+ii for ii in range(4)]
 		else:
 			assert False, "TODO: support symbolic address"
-		# TODO: update mem!
 		mem = st.MEM
 		for loc, val in zip(instr_locs, instr_parts):
 			mem = mem.update(loc, val)
