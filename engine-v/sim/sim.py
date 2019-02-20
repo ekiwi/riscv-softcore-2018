@@ -93,7 +93,6 @@ def analyze_rv32_interpreter(program: List[Instruction], bbs: List[BasicBlock]):
 	ex = SymExec()
 
 	def step(st) -> MachineState:
-		print(st.PC.serialize())
 		st = st.update(PC=simplify(st.PC))
 		assert st.PC.is_constant(), f"PC: {st.PC.serialize()}"
 		pc_concrete = st.PC.bv_unsigned_value()
@@ -107,7 +106,7 @@ def analyze_rv32_interpreter(program: List[Instruction], bbs: List[BasicBlock]):
 	print("--------")
 	st = orig_state
 
-	for ii in range(10):
+	for ii in range(15):
 		st = step(st)
 
 	print(f"PC: {simplify(st.PC).serialize()}")

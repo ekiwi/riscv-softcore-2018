@@ -344,8 +344,12 @@ class SymExec:
 		dst, src = st.R[instr.reg], BitVecVal(instr.imm, 8)
 		res, z, c = SymExec._alu(instr.op, dst, src, st.C)
 		return st.update(R=st.R.update(instr.reg, res), Z=z, C=c)
-	def exec_AluReg(self, instr: AluReg, _):
-		raise RuntimeError("TODO: implement AluReg instruction")
+	def exec_AluReg(self, instr: AluReg, st):
+		if instr.op == AluRegOp.Swap:
+			reg = st.R[instr.reg]
+			new_reg = BVConcat(BVExtract(reg, 0, 3), BVExtract(reg, 4, 7))
+			return st.update(R=st.R.update(instr.reg, new_reg))
+		raise RuntimeError(f"TODO: implement AluReg instruction: {instr.op}")
 	def exec_Skip(self, instr: Skip, st):
 		bit = BVExtract(st.R[instr.reg], instr.bit, instr.bit)
 		taken = Equals(bit, BitVecVal(int(instr.bit_is_one), 1))
