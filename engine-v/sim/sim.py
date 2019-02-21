@@ -212,15 +212,15 @@ def analyze_rv32_interpreter(program: List[Instruction], bbs: List[BasicBlock]):
 	print()
 	print("SYM EXEC")
 	print("--------")
-	done, end_state = ex.run()
+	done, end_state = ex.run(max_steps=20*100)
 	ex.print_state()
 	ex.print_mem()
 	ex.print_path()
 	print(ex.taken)
 	print(f"DONE? {done}")
-	if done:
-		for cond, st in end_state:
-			print(cond.serialize())
+	print("PATHS:")
+	for ii, (cond, st) in enumerate(end_state):
+		print(str(ii) + ") " + cond.serialize())
 
 
 	return
