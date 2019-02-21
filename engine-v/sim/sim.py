@@ -5,7 +5,8 @@ import sys, os, tempfile, subprocess
 from typing import Optional, List, Union, Tuple
 
 from mf8 import BasicBlock, load_program, MachineState, SymExec, Instruction, BitVecVal
-from pysmt.shortcuts import Symbol, BVType, BVExtract, BVConcat
+from pysmt.shortcuts import Symbol, BVType, BVExtract, BVConcat, Bool, And, Solver, Not
+from pysmt.logics import QF_AUFBV
 from sym import simplify
 
 from functools import reduce
@@ -52,6 +53,76 @@ def load_rv32_interpreter() -> Tuple[List[Instruction], List[BasicBlock]]:
 	return program, bbs
 
 
+class SymbolicExecutionEngine:
+	def __init__(self, program, start_state, exec):
+		self.start = start_state.update(PC=simplify(start_state.PC))
+		self.st = self.start
+		self.program = program
+		self.exec = exec
+		self.path_conditions = []
+		self.taken = []
+		self.solver = None
+
+	@property
+	def path_condition(self):
+		if len(self.path_conditions) == 0:
+			return Bool(True)
+		else:
+			return reduce(And, self.path_conditions)
+
+	def is_feasible(self, cond):
+		return self.solver.is_sat(cond)
+
+	def pick_next_pc(self, next_pc):
+		cond, tru, fal = next_pc
+		cond = simplify(cond)
+		if cond.is_true(): taken = True
+		elif cond.is_false(): taken = False
+		elif self.is_feasible(cond): taken = True
+		elif self.is_feasible(Not(cond)): taken = False
+		else: raise RuntimeError(f"Infeasible condition: {cond}")
+		self.solver.push()
+		self.taken.append(taken)
+		path_cond = cond if taken else simplify(Not(cond))
+		self.solver.add_assertion(path_cond)
+		self.path_conditions.append(path_cond)
+		return tru if taken else fal
+
+	def step(self):
+		assert self.st.PC.is_constant(), f"PC: {self.st.PC.serialize()}"
+		pc_concrete = self.st.PC.bv_unsigned_value()
+		instr = self.program[pc_concrete]
+		print(f"Step: {pc_concrete:04x} {instr}")
+		next_st, next_pc = self.exec(instr, self.st)
+		return next_st.update(PC=simplify(self.pick_next_pc(next_pc)))
+
+	def run(self, max_steps = 100):
+		self.st = self.start
+		self.path_conditions = []
+		self.taken = []
+		self.solver = Solver(logic=QF_AUFBV)
+		start_pc = self.start.PC.bv_unsigned_value()
+		for ii in range(max_steps):
+			self.st = self.step()
+			if self.st.PC.bv_unsigned_value() == start_pc:
+				return True
+		return False
+
+	def print_state(self):
+		print(f"PC: {self.st.PC.bv_unsigned_value()}")
+		print(self.st.simplify())
+
+	def print_mem(self):
+		print("MEM:")
+		for index, val in self.st._mem._data:
+			print(f"{index} -> {val}")
+
+	def print_path(self):
+		print("Path Conditons:")
+		for cond, taken in zip(self.path_conditions, self.taken):
+			if cond.is_true(): continue
+			print(f"{cond.serialize()}")
+
 def analyze_rv32_interpreter(program: List[Instruction], bbs: List[BasicBlock]):
 	print("analyzing rv32 interpreter ...")
 
@@ -90,41 +161,18 @@ def analyze_rv32_interpreter(program: List[Instruction], bbs: List[BasicBlock]):
 		return st.update(MEM = mem)
 	orig_state = place_instr(loc=0, instr=RV32I_instr, st=orig_state)
 
-	ex = SymExec()
-
-	def pick_next_pc(next_pc):
-		cond, tru, fal = next_pc
-		cond = simplify(cond)
-		if cond.is_true(): return tru
-		if cond.is_false(): return fal
-		# TODO: call solver to check feasibility and add path constraints to stack
-		return tru
-
-
-	def step(st) -> MachineState:
-		st = st.update(PC=simplify(st.PC))
-		assert st.PC.is_constant(), f"PC: {st.PC.serialize()}"
-		pc_concrete = st.PC.bv_unsigned_value()
-		instr = program[pc_concrete]
-		print(f"Step: {pc_concrete:04x} {instr}")
-		next_st, next_pc = ex.exec(instr, st)
-		return next_st.update(PC=simplify(pick_next_pc(next_pc)))
-
+	mf8_ex = SymExec()
+	ex = SymbolicExecutionEngine(program=program, start_state=orig_state, exec=mf8_ex.exec)
 
 	print()
 	print()
 	print("SYM EXEC")
 	print("--------")
-	st = orig_state
+	ex.run()
+	ex.print_state()
+	ex.print_mem()
+	ex.print_path()
 
-	for ii in range(100):
-		st = step(st)
-		if st.PC.bv_unsigned_value() == start_pc:
-			raise RuntimeError(f"Back at start PC, we are done!")
-
-	print(f"PC: {simplify(st.PC).serialize()}")
-
-	print(st.simplify())
 
 
 	return
