@@ -156,9 +156,10 @@ class SymbolicExecutionEngine:
 		print(f"PC: {self.st.PC.bv_unsigned_value()}")
 		print(self.st.simplify())
 
-	def print_mem(self):
+	@staticmethod
+	def print_mem(st):
 		print("MEM:")
-		for index, val in self.st._mem._data:
+		for index, val in st._mem._data:
 			print(f"{index} -> {val}")
 
 	def print_path(self):
@@ -214,13 +215,15 @@ def analyze_rv32_interpreter(program: List[Instruction], bbs: List[BasicBlock]):
 	print("--------")
 	done, end_state = ex.run(max_steps=20*100)
 	ex.print_state()
-	ex.print_mem()
+	ex.print_mem(ex.st)
 	ex.print_path()
 	print(ex.taken)
 	print(f"DONE? {done}")
 	print("PATHS:")
 	for ii, (cond, st) in enumerate(end_state):
 		print(str(ii) + ") " + cond.serialize())
+		ex.print_mem(st)
+
 
 
 	return
