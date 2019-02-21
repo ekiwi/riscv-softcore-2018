@@ -10,6 +10,22 @@ import pysmt.simplifier
 from functools import reduce
 
 
+def find_bit_ranges(bit_str: str):
+	""" returns [(1/0, msb, lsb)]"""
+	if len(bit_str) == 0: return []
+	if len(bit_str) == 1: return [(int(bit_str), 0 , 0)]
+	ranges = []
+	lsb = 0
+	val = bit_str[-1]
+	for ii, cc in enumerate(reversed(bit_str)):
+		if ii == lsb: continue
+		if cc != val:
+			ranges.append((int(val), ii-1, lsb))
+			val = cc
+			lsb = ii
+	ranges.append((int(val), len(bit_str) - 1, lsb))
+	return list(reversed(ranges))
+
 class Simplifier(pysmt.simplifier.Simplifier):
 	"""
 	Allows us to add some custom simplifications to make symbolic execution easier.
@@ -17,16 +33,18 @@ class Simplifier(pysmt.simplifier.Simplifier):
 	def __init__(self, env=None):
 		super().__init__(env)
 
+	# TODO: is this ok? can we call our self recursively?
+	def walk_ext(self, ext):
+		return self.walk_bv_extract(ext, [ext.arg(0)])
+
 	def walk_bv_extract(self, formula, args, **kwargs):
-		# TODO: is this ok? can we call our self recursively?
-		def walk_ext(ext):
-			return self.walk_bv_extract(ext, [ext.arg(0)])
+
 		if args[0].is_bv_constant():
 			return super().walk_bv_extract(formula, args, **kwargs)
 		msb_outer, lsb_outer = formula.bv_extract_end(), formula.bv_extract_start()
 		width_outer = 1 + msb_outer - lsb_outer
 		if args[0].is_bv_extract():
-			inner = walk_ext(args[0])
+			inner = self.walk_ext(args[0])
 			lsb_inner = inner.bv_extract_start()
 			lsb_new = lsb_inner + lsb_outer
 			msb_new = lsb_new + width_outer - 1
@@ -38,17 +56,37 @@ class Simplifier(pysmt.simplifier.Simplifier):
 			# drop left most input if it is not reflected in output
 			if msb_outer < lsb_left:
 				assert msb_outer >= lsb_outer
-				return walk_ext(self.manager.BVExtract(right, lsb_outer, msb_outer))
+				return self.walk_ext(self.manager.BVExtract(right, lsb_outer, msb_outer))
 			# drop right most input if it is not reflected in output
 			elif lsb_outer >= lsb_left:
 				assert msb_outer - lsb_left >= lsb_outer - lsb_left
-				return walk_ext(self.manager.BVExtract(left, lsb_outer - lsb_left, msb_outer - lsb_left))
+				return self.walk_ext(self.manager.BVExtract(left, lsb_outer - lsb_left, msb_outer - lsb_left))
 			# push extract into concat
 			else:
-				left_extract = walk_ext(self.manager.BVExtract(left, 0, msb_outer - lsb_left))
-				right_extract = walk_ext(self.manager.BVExtract(right, lsb_outer, lsb_left - 1))
+				left_extract = self.walk_ext(self.manager.BVExtract(left, 0, msb_outer - lsb_left))
+				right_extract = self.walk_ext(self.manager.BVExtract(right, lsb_outer, lsb_left - 1))
 				return self.manager.BVConcat(left_extract, right_extract)
 		return self.manager.BVExtract(args[0], lsb_outer, msb_outer)
+
+	def walk_bv_and(self, formula, args, **kwargs):
+		# simplify bitwise or with one constant argument
+		const_arg_count = sum(aa.is_constant() for aa in args)
+		if const_arg_count != 1:
+			return super().walk_bv_and(formula, args, **kwargs)
+		#
+		const = next(aa for aa in args if aa.is_constant())
+		bit_str = const.bv_bin_str()
+		ranges = find_bit_ranges(bit_str)
+		# heuristic: do not simplify if there are too many ranges
+		if len(ranges) > 2:
+			return super().walk_bv_and(formula, args, **kwargs)
+		sym = next(aa for aa in args if not aa.is_constant())
+		bits = [self.manager.BV(0, msb - lsb + 1) if val == 0 else
+				self.walk_ext(self.manager.BVExtract(sym, lsb, msb))
+				for val, msb, lsb in ranges]
+		return reduce(self.manager.BVConcat, bits)
+
+
 
 _simplifier = Simplifier(get_env())
 
