@@ -54,7 +54,8 @@ def load_rv32_interpreter() -> Tuple[List[Instruction], List[BasicBlock]]:
 
 
 class SymbolicExecutionEngine:
-	def __init__(self, program, start_state, exec):
+	# WARNING: CVC4 seems to have trouble with incremental solving
+	def __init__(self, program, start_state, exec, smt_engine="z3"):
 		self.start = start_state.update(PC=simplify(start_state.PC))
 		self.st = self.start
 		self.program = program
@@ -62,31 +63,71 @@ class SymbolicExecutionEngine:
 		self.path_conditions = []
 		self.taken = []
 		self.solver = None
+		self.branch_count = 0
+		self.smt_engine = smt_engine
+
+	def _push_path_condition(self, taken, cond):
+		self.taken.append(taken)
+		self.path_conditions.append(cond)
+		self.solver.push()
+		self.solver.add_assertion(cond)
+	def _pop_path_condition(self):
+		self.solver.pop()
+		return self.taken.pop(), self.path_conditions.pop()
+
 
 	@property
 	def path_condition(self):
-		if len(self.path_conditions) == 0:
+		pcs = [cond for cond in self.path_conditions if not cond.is_constant()]
+		if len(pcs) == 0:
 			return Bool(True)
 		else:
-			return reduce(And, self.path_conditions)
+			return reduce(And, pcs)
 
 	def is_feasible(self, cond):
-		return self.solver.is_sat(cond)
+		is_sat = self.solver.is_sat(self.path_condition)
+		#print("feasible?")
+		#print(cond.serialize())
+		#print("assuming:")
+		#print(self.path_condition)
+		#print(f"-> {is_sat}")
+		return is_sat
 
 	def pick_next_pc(self, next_pc):
 		cond, tru, fal = next_pc
+		if len(self.taken) > self.branch_count:
+			ret = tru if self.taken[self.branch_count] else fal
+			self.branch_count += 1
+			return ret
 		cond = simplify(cond)
 		if cond.is_true(): taken = True
 		elif cond.is_false(): taken = False
 		elif self.is_feasible(cond): taken = True
 		elif self.is_feasible(Not(cond)): taken = False
 		else: raise RuntimeError(f"Infeasible condition: {cond}")
-		self.solver.push()
-		self.taken.append(taken)
-		path_cond = cond if taken else simplify(Not(cond))
-		self.solver.add_assertion(path_cond)
-		self.path_conditions.append(path_cond)
+		self._push_path_condition(taken, cond if taken else simplify(Not(cond)))
+		self.branch_count += 1
 		return tru if taken else fal
+
+	def backtrack(self):
+		found_branch = False
+		for _ in reversed(range(len(self.taken))):
+			taken, cond = self._pop_path_condition()
+			#self.solver.pop()
+			# if the cond is constant, then there is no other way to take that branch under current assumptions
+			if cond.is_constant(): continue
+			# if taken is False, we already explored all feasible directions
+			if not taken: continue
+			# if inverted condition is not feasible, then there is not other way to take that branch under current assumptions
+			if not self.is_feasible(Not(cond)): continue
+			# if we get here, we have found a feasible invertible branch!
+			found_branch = True
+			break
+		if not found_branch: return False
+		self._push_path_condition(False, simplify(Not(cond)))
+		self.branch_count = 0
+		self.st = self.start
+		return True
 
 	def step(self):
 		assert self.st.PC.is_constant(), f"PC: {self.st.PC.serialize()}"
@@ -100,13 +141,16 @@ class SymbolicExecutionEngine:
 		self.st = self.start
 		self.path_conditions = []
 		self.taken = []
-		self.solver = Solver(logic=QF_AUFBV)
+		self.solver = Solver(name=self.smt_engine, logic=QF_AUFBV)
 		start_pc = self.start.PC.bv_unsigned_value()
+		end_states = []
 		for ii in range(max_steps):
 			self.st = self.step()
 			if self.st.PC.bv_unsigned_value() == start_pc:
-				return True
-		return False
+				end_states.append((self.path_condition, self.st))
+				if not self.backtrack():
+					return True, end_states
+		return False, end_states
 
 	def print_state(self):
 		print(f"PC: {self.st.PC.bv_unsigned_value()}")
@@ -168,11 +212,15 @@ def analyze_rv32_interpreter(program: List[Instruction], bbs: List[BasicBlock]):
 	print()
 	print("SYM EXEC")
 	print("--------")
-	ex.run()
+	done, end_state = ex.run()
 	ex.print_state()
 	ex.print_mem()
 	ex.print_path()
-
+	print(ex.taken)
+	print(f"DONE? {done}")
+	if done:
+		for cond, st in end_state:
+			print(cond.serialize())
 
 
 	return
