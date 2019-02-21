@@ -232,7 +232,7 @@ def load_program(filename) -> Tuple[List[Instruction], List[BasicBlock]]:
 	return program, bbs
 
 # symexec stuff
-from pysmt.shortcuts import Symbol, BVType, BV, BVAdd, BVSub, BVZExt, BVAnd, BVOr, BVXor, BVConcat, BVComp, BVExtract, Equals, Ite
+from pysmt.shortcuts import Symbol, BVType, BV, BVAdd, BVSub, BVZExt, BVAnd, BVOr, BVXor, BVConcat, BVComp, BVExtract, Equals, Ite, Bool
 from sym import simplify, ConcreteAddrMem, SymbolicAddrMem
 
 def BitVecVal(val: int, width: int): return BV(val, width)
@@ -288,7 +288,6 @@ class MachineState:
 			st.__setattr__(attr, val)
 		return st
 	def simplify(self) -> "MachineState":
-		arg_names = {'PC', 'R', 'MEM', 'C', 'Z'}
 		st = MachineState()
 		for attr in ['_pc', '_c', '_z']:
 			st.__setattr__(attr, simplify(self.__getattribute__(attr)))
@@ -312,12 +311,14 @@ class MachineState:
 
 class SymExec:
 	def exec(self, instr: Instruction, state):
+		assert state.PC.is_constant(), "this symexec implementation can only deal with constant PCs"
 		method = 'exec_' + instr.__class__.__name__
 		ret = getattr(self, method)(instr, state)
 		if isinstance(ret, MachineState):
-			return ret.update(PC=BVAdd(ret.PC, bv16_1))
+			return ret, (Bool(True), BVAdd(ret.PC, bv16_1), None)
 		else:
-			return ret[0].update(PC=ret[1])
+			return ret[0], (ret[1][0], ret[1][1], BVAdd(ret[0].PC, bv16_1))
+
 	def visit_IO(self, instr: IO, _):
 		raise RuntimeError(f"IO instructions not supported! {instr}")
 	@staticmethod
@@ -359,16 +360,19 @@ class SymExec:
 		res, z, c = SymExec._alu(instr.op, dst, src, st.C)
 		return st.update(R=st.R.update(instr.reg, res), Z=z, C=c)
 	def exec_AluReg(self, instr: AluReg, st):
+		reg, new_reg = st.R[instr.reg], None
 		if instr.op == AluRegOp.Swap:
-			reg = st.R[instr.reg]
 			new_reg = BVConcat(BVExtract(reg, 0, 3), BVExtract(reg, 4, 7))
-			return st.update(R=st.R.update(instr.reg, new_reg))
-		raise RuntimeError(f"TODO: implement AluReg instruction: {instr.op}")
+		if instr.op == AluRegOp.Lsr:
+			new_reg = BVZExt(BVExtract(reg, 0, 6), 1)
+		if new_reg is None:
+			raise RuntimeError(f"TODO: implement AluReg instruction: {instr.op}")
+		return st.update(R=st.R.update(instr.reg, new_reg))
+
 	def exec_Skip(self, instr: Skip, st):
 		bit = BVExtract(st.R[instr.reg], instr.bit, instr.bit)
 		taken = Equals(bit, BitVecVal(int(instr.bit_is_one), 1))
-		pc = BVAdd(st.PC, Ite(taken, BitVecVal(2, 16), bv16_1))
-		return st, pc
+		return st, (taken, BVAdd(st.PC, BitVecVal(2, 16)))
 	def exec_Mem(self, instr: Mem, st) -> str:
 		ZReg = BVConcat(st.R[31], st.R[30])
 		if instr.offset >= 0:
@@ -385,15 +389,15 @@ class SymExec:
 			BranchCond.NE: lambda: Equals(st.Z, BitVecVal(0, 1)),
 		}[instr.cond]()
 		if instr.offset >= 0:
-			taken_pc = BVAdd(st.pc, BitVecVal(instr.offset + 1, 16))
+			taken_pc = BVAdd(st.PC, BitVecVal(instr.offset + 1, 16))
 		else:
-			taken_pc = BVSub(st.pc, BitVecVal(-instr.offset + 1, 16))
-		return st, Ite(taken, taken_pc, BVAdd(st.pc, bv16_1))
+			taken_pc = BVSub(st.PC, BitVecVal(-instr.offset + 1, 16))
+		return st, (taken, taken_pc)
 	def exec_Jump(self, instr: Jump, st):
 			if instr.offset >= 0:
-				pc = BVAdd(st.pc, BitVecVal(instr.offset + 1, 16))
+				pc = BVAdd(st.PC, BitVecVal(instr.offset + 1, 16))
 			else:
-				pc = BVSub(st.pc, BitVecVal(-instr.offset + 1, 16))
-			return st, pc
+				pc = BVSub(st.PC, BitVecVal(-instr.offset + 1, 16))
+			return st, (Bool(True), pc)
 	def exec_ResolvedBranch(self, instr: ResolvedBranch, _) -> str:
 		raise RuntimeError("ResolvedBranches and basic blocks are not supported for symbolic execution")

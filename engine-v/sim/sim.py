@@ -92,13 +92,24 @@ def analyze_rv32_interpreter(program: List[Instruction], bbs: List[BasicBlock]):
 
 	ex = SymExec()
 
+	def pick_next_pc(next_pc):
+		cond, tru, fal = next_pc
+		cond = simplify(cond)
+		if cond.is_true(): return tru
+		if cond.is_false(): return fal
+		# TODO: call solver to check feasibility and add path constraints to stack
+		return tru
+
+
 	def step(st) -> MachineState:
 		st = st.update(PC=simplify(st.PC))
 		assert st.PC.is_constant(), f"PC: {st.PC.serialize()}"
 		pc_concrete = st.PC.bv_unsigned_value()
 		instr = program[pc_concrete]
 		print(f"Step: {pc_concrete:04x} {instr}")
-		return ex.exec(instr, st)
+		next_st, next_pc = ex.exec(instr, st)
+		return next_st.update(PC=simplify(pick_next_pc(next_pc)))
+
 
 	print()
 	print()
@@ -106,8 +117,10 @@ def analyze_rv32_interpreter(program: List[Instruction], bbs: List[BasicBlock]):
 	print("--------")
 	st = orig_state
 
-	for ii in range(15):
+	for ii in range(100):
 		st = step(st)
+		if st.PC.bv_unsigned_value() == start_pc:
+			raise RuntimeError(f"Back at start PC, we are done!")
 
 	print(f"PC: {simplify(st.PC).serialize()}")
 
