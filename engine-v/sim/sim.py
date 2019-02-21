@@ -160,7 +160,7 @@ class SymbolicExecutionEngine:
 	def print_mem(st):
 		print("MEM:")
 		for index, val in st._mem._data:
-			print(f"{index} -> {val}")
+			print(f"{index.serialize()} -> {val.serialize()}")
 
 	def print_path(self):
 		print("Path Conditons:")
