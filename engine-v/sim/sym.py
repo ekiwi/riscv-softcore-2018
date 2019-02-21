@@ -71,7 +71,12 @@ class Simplifier(pysmt.simplifier.Simplifier):
 	def walk_bv_and(self, formula, args, **kwargs):
 		# simplify bitwise or with one constant argument
 		const_arg_count = sum(aa.is_constant() for aa in args)
-		if const_arg_count != 1:
+		if const_arg_count == 2:
+			return super().walk_bv_and(formula, args, **kwargs)
+		if const_arg_count == 0:
+			# a & a = a
+			if args[0] == args[1]:
+				return args[0]
 			return super().walk_bv_and(formula, args, **kwargs)
 		#
 		const = next(aa for aa in args if aa.is_constant())
@@ -104,7 +109,7 @@ class ConcreteAddrMem:
 	def update(self, index, value):
 		assert isinstance(index, int), f"memory '{self.prefix}' requires a constant address not: `{index}`"
 		assert len(self._data) > index >=0
-		new_data = self._data[0:index] + [value] + self._data[index+1:]
+		new_data = self._data[0:index] + [simplify(value)] + self._data[index+1:]
 		return ConcreteAddrMem(self.prefix, suffix='', typ=None, size=None, _data=new_data)
 	def __getitem__(self, item):
 		return self._data[item]
@@ -112,6 +117,8 @@ class ConcreteAddrMem:
 def make_bv(val, typ):
 	if isinstance(val, int):
 		val = BV(val, typ.width)
+	else:
+		val = simplify(val)
 	assert val.get_type() == typ
 	return val
 
