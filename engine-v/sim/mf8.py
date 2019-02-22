@@ -414,13 +414,13 @@ class SymExec:
 		if instr.offset >= 0:
 			taken_pc = BVAdd(st.PC, BitVecVal(instr.offset + 1, 16))
 		else:
-			taken_pc = BVSub(st.PC, BitVecVal(-instr.offset + 1, 16))
+			taken_pc = BVSub(st.PC, BitVecVal((-instr.offset) + 1, 16))
 		return st, (taken, taken_pc)
 	def exec_Jump(self, instr: Jump, st):
 			if instr.offset >= 0:
 				pc = BVAdd(st.PC, BitVecVal(instr.offset + 1, 16))
 			else:
-				pc = BVSub(st.PC, BitVecVal(-instr.offset + 1, 16))
+				pc = BVSub(st.PC, BitVecVal(-instr.offset - 1, 16))
 			return st, (Bool(True), pc)
 	def exec_ResolvedBranch(self, instr: ResolvedBranch, _) -> str:
 		raise RuntimeError("ResolvedBranches and basic blocks are not supported for symbolic execution")
