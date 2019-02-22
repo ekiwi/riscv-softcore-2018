@@ -55,11 +55,11 @@ def load_rv32_interpreter() -> Tuple[List[Instruction], List[BasicBlock]]:
 
 class SymbolicExecutionEngine:
 	# WARNING: CVC4 seems to have trouble with incremental solving
-	def __init__(self, program, start_state, exec, smt_engine="z3"):
+	def __init__(self, program, start_state, semantics, smt_engine="z3"):
 		self.start = start_state.update(PC=simplify(start_state.PC))
 		self.st = self.start
 		self.program = program
-		self.exec = exec
+		self.semantics = semantics
 		self.path_conditions = []
 		self.taken = []
 		self.solver = None
@@ -134,7 +134,7 @@ class SymbolicExecutionEngine:
 		pc_concrete = self.st.PC.bv_unsigned_value()
 		instr = self.program[pc_concrete]
 		print(f"Step: {pc_concrete:04x} {instr}")
-		next_st, next_pc = self.exec(instr, self.st)
+		next_st, next_pc = self.semantics.exec(instr, self.st)
 		return next_st.update(PC=simplify(self.pick_next_pc(next_pc)))
 
 	def run(self, max_steps = 100):
@@ -156,11 +156,13 @@ class SymbolicExecutionEngine:
 		print(f"PC: {self.st.PC.bv_unsigned_value()}")
 		print(self.st.simplify())
 
-	@staticmethod
-	def print_mem(st):
+	def print_mem(self, st):
 		print("MEM:")
+		taint = lambda x: self.semantics.taint.get(x, "")
 		for index, val in st._mem._data:
 			print(f"{index.serialize()} -> {val.serialize()}")
+			print(f"{taint(index)} -> {taint(val)}")
+
 
 	def print_path(self):
 		print("Path Conditons:")
@@ -207,13 +209,17 @@ def analyze_rv32_interpreter(program: List[Instruction], bbs: List[BasicBlock]):
 	orig_state = place_instr(loc=0, instr=RV32I_instr, st=orig_state)
 
 	mf8_ex = SymExec()
-	ex = SymbolicExecutionEngine(program=program, start_state=orig_state, exec=mf8_ex.exec)
+	ex = SymbolicExecutionEngine(program=program, start_state=orig_state, semantics=mf8_ex)
 
 	print()
 	print()
 	print("SYM EXEC")
 	print("--------")
-	done, end_state = ex.run(max_steps=20*100)
+	# execute all 16 paths:
+	#max_steps = 20 * 100
+	# execute ~2 paths:
+	max_steps = 2 * 100
+	done, end_state = ex.run(max_steps=max_steps)
 	ex.print_state()
 	ex.print_mem(ex.st)
 	ex.print_path()

@@ -296,6 +296,15 @@ class MachineState:
 		st._r._data = [simplify(rr) for rr in self._r._data]
 		st._r.prefix = self._r.prefix
 		return st
+	def diff(self, other: "MachineState"):
+		assert isinstance(other, MachineState)
+		delta = [r1 for r1, r0 in zip(other._r._data, self._r._data) if r1 != r0]
+		if self.PC != other.PC: delta += [other.PC]
+		if self.Z != other.Z: delta += [other.Z]
+		if self.C != other.C: delta += [other.C]
+		if self.MEM.array() != other.MEM.array(): delta += [other.MEM.array()]
+		return delta
+
 
 	def __str__(self):
 		# TODO: nicer output with register table
@@ -310,14 +319,28 @@ class MachineState:
 	def __repr__(self): return str(self)
 
 class SymExec:
+	def __init__(self):
+		self.pc_width = 16
+		self.pc_inc = BV(1, self.pc_width)
+		self.taint = {}
+		self.track_taint = True
+
+	def taint_diff(self, st, st_next, instr):
+		for dd in st.diff(st_next):
+			self.taint[dd] = instr
+
+
 	def exec(self, instr: Instruction, state):
 		assert state.PC.is_constant(), "this symexec implementation can only deal with constant PCs"
 		method = 'exec_' + instr.__class__.__name__
 		ret = getattr(self, method)(instr, state)
 		if isinstance(ret, MachineState):
-			return ret, (Bool(True), BVAdd(ret.PC, bv16_1), None)
+			st_next, pc_next = ret, (Bool(True), BVAdd(ret.PC, self.pc_inc), None)
 		else:
-			return ret[0], (ret[1][0], ret[1][1], BVAdd(ret[0].PC, bv16_1))
+			st_next, pc_next = ret[0], (ret[1][0], ret[1][1], BVAdd(ret[0].PC, self.pc_inc))
+		if self.track_taint:
+			self.taint_diff(state, st_next, instr)
+		return st_next, pc_next
 
 	def visit_IO(self, instr: IO, _):
 		raise RuntimeError(f"IO instructions not supported! {instr}")
