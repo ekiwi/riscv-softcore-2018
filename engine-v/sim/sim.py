@@ -5,12 +5,12 @@ import sys, os, tempfile, subprocess
 from typing import Optional, List, Union, Tuple
 
 from mf8 import BasicBlock, load_program, MachineState, SymExec, Instruction, BitVecVal
-from pysmt.shortcuts import Symbol, BVType, BVExtract, BVConcat, Bool, And, Solver, Not
+from pysmt.shortcuts import Symbol, BVType, BVExtract, BVConcat, Bool, And, Solver, Not, Or, Ite, Equals, Store, Select, BVAdd, ArrayType, Implies
 from pysmt.logics import QF_AUFBV
 from sym import simplify
 
 from functools import reduce
-
+import operator
 
 
 def cat(*vargs):
@@ -170,6 +170,20 @@ class SymbolicExecutionEngine:
 			if cond.is_true(): continue
 			print(f"{cond.serialize()}")
 
+def sym_exec_rsicv_add(rs1, rs2, rd, regs):
+	res = BVAdd(Select(regs, rs1), Select(regs, rs2))
+	regs_n = Store(regs, rd, res)
+	return Ite(Equals(rd, BitVecVal(0, 5)), regs, regs_n)
+
+class ArrayValue:
+	def __init__(self, array):
+		assert array.is_array_value()
+		self.default = array.array_value_default().bv_unsigned_value()
+		vs = array.array_value_assigned_values_map()
+		self.values = { v[0].bv_unsigned_value(): v[1].bv_unsigned_value() for v in vs.items()}
+	def __getitem__(self, item):
+		return self.values.get(item, self.default)
+
 def analyze_rv32_interpreter(program: List[Instruction], bbs: List[BasicBlock]):
 	print("analyzing rv32 interpreter ...")
 
@@ -216,19 +230,91 @@ def analyze_rv32_interpreter(program: List[Instruction], bbs: List[BasicBlock]):
 	print("SYM EXEC")
 	print("--------")
 	# execute all 16 paths:
-	#max_steps = 20 * 100
+	max_steps = 20 * 100
 	# execute ~2 paths:
-	max_steps = 2 * 100
+	#max_steps = 2 * 100
 	done, end_state = ex.run(max_steps=max_steps)
 	ex.print_state()
 	ex.print_mem(ex.st)
 	ex.print_path()
 	print(ex.taken)
 	print(f"DONE? {done}")
-	print("PATHS:")
-	for ii, (cond, st) in enumerate(end_state):
-		print(str(ii) + ") " + cond.serialize())
-		ex.print_mem(st)
+	#print("PATHS:")
+	#for ii, (cond, st) in enumerate(end_state):
+	#	print(str(ii) + ") " + cond.serialize())
+	#	ex.print_mem(st)
+
+	solver = Solver(name="z3", logic=QF_AUFBV)
+
+	# check for completeness
+	conds = reduce(Or, (cond for cond, st in end_state))
+	complete = not solver.is_sat(Not(conds))
+	print(f"Complete? {complete}")
+
+	# check result of every path:
+	def to_mem_addrs(reg_index):
+		return reversed([0xf100 + reg_index*4 + jj for jj in range(4)])
+
+	def relate_regs(mem, regs):
+		def relate_loc(ii):
+			mem_locs = [Select(mem, BitVecVal(addr, 16)) for addr in to_mem_addrs(ii)]
+			return Equals(cat(*mem_locs), Select(regs, BitVecVal(ii, 5)))
+		return reduce(And, [relate_loc(ii) for ii in range(32)])
+
+
+	def name_value(solver, name, val):
+		sym = Symbol(name, val.get_type())
+		solver.add_assertion(Equals(sym, val))
+
+	def locs_to_str(name, array, locs):
+		return "; ".join(f"{name}[{ii:04x}] = 0x{array[ii]:02x}" for ii in sorted(list(set(locs))))
+
+	for cond, end_st in end_state:
+		# create clean slate solver
+		solver = Solver(name="z3", logic=QF_AUFBV, generate_models=True)
+		# symbolically execute the RISC-V add
+		regs = Symbol('RV32I_REGS', ArrayType(BVType(5), BVType(32)))
+		regs_n = sym_exec_rsicv_add(rs1=rs1, rs2=rs2, rd=rd, regs=regs)
+		name_value(solver, "DBG_RV32I_REGS_N", regs_n)
+		# add mem to regs relation
+		mem_orig = orig_state.MEM.array()
+		pre = And(And(cond, relate_regs(mem_orig, regs)), Equals(Select(regs, BitVecVal(0, 5)), BitVecVal(0, 32)))
+		mem_n = end_st.MEM.array()
+		post = relate_regs(mem_n, regs_n)
+		# DEBUG: add symbols for every memory write
+		mem_data = end_st._mem._data
+		mem_write_locs = [Symbol(f"DBG_MF8_MEM_WRITE_LOC_{ii}", BVType(16)) for ii in range(len(mem_data))]
+		for sym, (expr, _) in zip(mem_write_locs, mem_data):
+			solver.add_assertion(Equals(sym, expr))
+		# now check for validity
+		formula = Implies(pre, post)
+		correct = solver.is_valid(formula)
+		print(f"Correct? {correct}")
+		if not correct:
+			print("Model:")
+			rs1_val = solver.get_value(rs1).bv_unsigned_value()
+			rs2_val = solver.get_value(rs2).bv_unsigned_value()
+			rd_val = solver.get_value(rd).bv_unsigned_value()
+			regs_val = ArrayValue(solver.get_value(regs))
+			regs_n_val = ArrayValue(solver.get_value(regs_n))
+			mem_val = ArrayValue(solver.get_value(mem_orig))
+			mem_n_val = ArrayValue(solver.get_value(mem_n))
+			reg_addrs = [rd_val, rs1_val, rs2_val]
+			mem_write_locs_vals = [solver.get_value(ll).bv_unsigned_value() for ll in mem_write_locs]
+			mem_addrs = reduce(operator.add, [list(to_mem_addrs(ii)) for ii in reg_addrs]) + mem_write_locs_vals
+			print(f"R[{rd_val}] <- R[{rs1_val}] + R[{rs2_val}]")
+			print(f"Pre:  {locs_to_str('R', regs_val, reg_addrs)}")
+			print(f"      {locs_to_str('M',  mem_val, mem_addrs)}")
+			print(f"Post: {locs_to_str('R', regs_n_val, reg_addrs)}")
+			print(f"      {locs_to_str('M',  mem_n_val, mem_addrs)}")
+			print(f"MEM write addresses: {[f'0x{loc:04x}' for loc in mem_write_locs_vals]}")
+			#print(regs_n_val)
+			#print(mem_val)
+			break
+
+
+
+
 
 
 
