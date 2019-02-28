@@ -137,7 +137,7 @@ class SymbolicExecutionEngine:
 		next_st, next_pc = self.semantics.exec(instr, self.st)
 		return next_st.update(PC=simplify(self.pick_next_pc(next_pc)))
 
-	def run(self, max_steps = 100):
+	def run(self, max_steps = 100, max_paths=0):
 		self.st = self.start
 		self.path_conditions = []
 		self.taken = []
@@ -150,6 +150,8 @@ class SymbolicExecutionEngine:
 				end_states.append((self.path_condition, self.st))
 				if not self.backtrack():
 					return True, end_states
+				if max_paths > 0 and len(end_states) == max_paths:
+					return False, end_states
 		return False, end_states
 
 	def print_state(self):
@@ -185,11 +187,10 @@ class ArrayValue:
 		return self.values.get(item, self.default)
 
 def analyze_rv32_interpreter(program: List[Instruction], bbs: List[BasicBlock]):
-	print("analyzing rv32 interpreter ...")
-
+	#print("analyzing rv32 interpreter ...")
 
 	mk_dot(dot_cfg(bbs), filename="cfg.pdf")
-	for bb in program: print(bb)
+	#for bb in program: print(bb)
 
 	# start at MainStart @ 0x0056
 	start_pc = 0x56
@@ -229,14 +230,10 @@ def analyze_rv32_interpreter(program: List[Instruction], bbs: List[BasicBlock]):
 	print()
 	print("SYM EXEC")
 	print("--------")
-	# execute all 16 paths:
-	max_steps = 20 * 100
-	# execute ~2 paths:
-	#max_steps = 2 * 100
-	done, end_state = ex.run(max_steps=max_steps)
-	ex.print_state()
-	ex.print_mem(ex.st)
-	ex.print_path()
+	done, end_state = ex.run(max_steps=2000, max_paths=2)
+	#ex.print_state()
+	#ex.print_mem(ex.st)
+	#ex.print_path()
 	print(ex.taken)
 	print(f"DONE? {done}")
 	#print("PATHS:")
@@ -253,7 +250,7 @@ def analyze_rv32_interpreter(program: List[Instruction], bbs: List[BasicBlock]):
 
 	# check result of every path:
 	def to_mem_addrs(reg_index):
-		return reversed([0xf100 + reg_index*4 + jj for jj in range(4)])
+		return reversed([0xf100 + reg_index*8 + jj for jj in range(4)])
 
 	def relate_regs(mem, regs):
 		def relate_loc(ii):
@@ -291,6 +288,10 @@ def analyze_rv32_interpreter(program: List[Instruction], bbs: List[BasicBlock]):
 		correct = solver.is_valid(formula)
 		print(f"Correct? {correct}")
 		if not correct:
+			print("Path condition:")
+			print(cond.serialize())
+			print("Symbolic Mem:")
+			ex.print_mem(end_st)
 			print("Model:")
 			rs1_val = solver.get_value(rs1).bv_unsigned_value()
 			rs2_val = solver.get_value(rs2).bv_unsigned_value()
@@ -310,6 +311,9 @@ def analyze_rv32_interpreter(program: List[Instruction], bbs: List[BasicBlock]):
 			print(f"MEM write addresses: {[f'0x{loc:04x}' for loc in mem_write_locs_vals]}")
 			#print(regs_n_val)
 			#print(mem_val)
+			# TODO: check PC post-condition
+			# TODO: add pre and post conditions for program memory equivalence
+			# TODO: add pre and post conditions for data memory equivalence
 			break
 
 
