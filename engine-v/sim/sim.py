@@ -230,7 +230,7 @@ def analyze_rv32_interpreter(program: List[Instruction], bbs: List[BasicBlock]):
 	print()
 	print("SYM EXEC")
 	print("--------")
-	done, end_state = ex.run(max_steps=2000, max_paths=2)
+	done, end_state = ex.run(max_steps=2000)
 	#ex.print_state()
 	#ex.print_mem(ex.st)
 	#ex.print_path()
@@ -268,7 +268,7 @@ def analyze_rv32_interpreter(program: List[Instruction], bbs: List[BasicBlock]):
 
 	for ii, (cond, end_st) in enumerate(end_state):
 		# create clean slate solver
-		solver = Solver(name="z3", logic=QF_AUFBV, generate_models=True)
+		solver = Solver(name="cvc4", logic=QF_AUFBV, generate_models=True)
 		# symbolically execute the RISC-V add
 		regs = Symbol('RV32I_REGS', ArrayType(BVType(5), BVType(32)))
 		regs_n = sym_exec_rsicv_add(rs1=rs1, rs2=rs2, rd=rd, regs=regs)
