@@ -5,7 +5,7 @@ import sys, os, tempfile, subprocess
 from typing import Optional, List, Union, Tuple
 
 from mf8 import BasicBlock, load_program, MachineState, SymExec, Instruction, BitVecVal
-from pysmt.shortcuts import Symbol, BVType, BVExtract, BVConcat, Bool, And, Solver, Not, Or, Ite, Equals, Store, Select, BVAdd, ArrayType, Implies
+from pysmt.shortcuts import Symbol, BVType, BVExtract, BVConcat, Bool, And, Solver, Not, Or, Ite, Equals, Store, Select, BVAdd, ArrayType, Implies, write_smtlib
 from pysmt.logics import QF_AUFBV
 from sym import simplify
 
@@ -266,7 +266,7 @@ def analyze_rv32_interpreter(program: List[Instruction], bbs: List[BasicBlock]):
 	def locs_to_str(name, array, locs):
 		return "; ".join(f"{name}[{ii:04x}] = 0x{array[ii]:02x}" for ii in sorted(list(set(locs))))
 
-	for cond, end_st in end_state:
+	for ii, (cond, end_st) in enumerate(end_state):
 		# create clean slate solver
 		solver = Solver(name="z3", logic=QF_AUFBV, generate_models=True)
 		# symbolically execute the RISC-V add
@@ -285,6 +285,7 @@ def analyze_rv32_interpreter(program: List[Instruction], bbs: List[BasicBlock]):
 			solver.add_assertion(Equals(sym, expr))
 		# now check for validity
 		formula = Implies(pre, post)
+		write_smtlib(Not(formula), f"path_{ii:02}.smt2")
 		correct = solver.is_valid(formula)
 		print(f"Correct? {correct}")
 		if not correct:
