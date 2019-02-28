@@ -387,7 +387,7 @@ class SymExec:
 		if instr.op == AluRegOp.Swap:
 			new_reg = BVConcat(BVExtract(reg, 0, 3), BVExtract(reg, 4, 7))
 		if instr.op == AluRegOp.Lsr:
-			new_reg = BVZExt(BVExtract(reg, 0, 6), 1)
+			new_reg = BVZExt(BVExtract(reg, 1, 7), 1)
 		if new_reg is None:
 			raise RuntimeError(f"TODO: implement AluReg instruction: {instr.op}")
 		return st.update(R=st.R.update(instr.reg, new_reg))
