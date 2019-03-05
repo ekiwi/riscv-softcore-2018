@@ -1,0 +1,9 @@
+project/
+target/
+.idea/
+
+*.anno.json
+*.fir
+*.v
+*.dot
+*.pid
