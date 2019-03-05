@@ -173,7 +173,9 @@ class SymbolicExecutionEngine:
 			print(f"{cond.serialize()}")
 
 def sym_exec_rsicv_add(rs1, rs2, rd, regs):
-	res = BVAdd(Select(regs, rs1), Select(regs, rs2))
+	rs1_val = Ite(Equals(rs1, BitVecVal(0, 5)), BitVecVal(0, 32), Select(regs, rs1))
+	rs2_val = Ite(Equals(rs2, BitVecVal(0, 5)), BitVecVal(0, 32), Select(regs, rs2))
+	res = BVAdd(rs1_val, rs2_val)
 	regs_n = Store(regs, rd, res)
 	return Ite(Equals(rd, BitVecVal(0, 5)), regs, regs_n)
 
@@ -237,9 +239,9 @@ def analyze_rv32_interpreter(program: List[Instruction], bbs: List[BasicBlock]):
 	print(ex.taken)
 	print(f"DONE? {done}")
 	#print("PATHS:")
-	#for ii, (cond, st) in enumerate(end_state):
-	#	print(str(ii) + ") " + cond.serialize())
-	#	ex.print_mem(st)
+	for ii, (cond, st) in enumerate(end_state):
+		print(str(ii) + ") " + cond.serialize())
+		#ex.print_mem(st)
 
 	solver = Solver(name="z3", logic=QF_AUFBV)
 
