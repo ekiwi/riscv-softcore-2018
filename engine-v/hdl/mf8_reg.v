@@ -24,16 +24,18 @@ module mf8_reg(Clk, Reset, Wr, Rd_Addr, Rr_Addr, Data_In, Rd_Data, Rr_Data, Z);
 
 	always @(posedge Clk) begin
 		Rd_Addr_r	<= Rd_Addr;
-		Rd_Data	<= RegD[Rd_Addr];
-		Rr_Data	<= RegR[Rr_Addr];
 		if (Wr == 1'b1) begin
 			RegD[Rd_Addr_r]	<= Data_In;
 			RegR[Rd_Addr_r]	<= Data_In;
 			if (Rd_Addr_r == Rd_Addr) begin
 				Rd_Data	<= Data_In;
+			end else begin
+				Rd_Data	<= RegD[Rd_Addr];
 			end
 			if (Rd_Addr_r == Rr_Addr) begin
 				Rr_Data	<= Data_In;
+			end else begin
+				Rr_Data	<= RegR[Rr_Addr];
 			end
 			if (Rd_Addr_r == 5'b11110) begin
 				Z[7:0]	<= Data_In;
@@ -41,6 +43,9 @@ module mf8_reg(Clk, Reset, Wr, Rd_Addr, Rr_Addr, Data_In, Rd_Data, Rr_Data, Z);
 			if (Rd_Addr_r == 5'b11111) begin
 				Z[15:8]	<= Data_In;
 			end
+		end else begin
+			Rd_Data	<= RegD[Rd_Addr];
+			Rr_Data	<= RegR[Rr_Addr];
 		end
 	end
 endmodule
