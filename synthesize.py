@@ -126,9 +126,10 @@ def main():
 		'name': 'engine-v',
 		'top': 'MF8A18_SoC',
 		'src': [os.path.join('hdl', ff) for ff in [
-			'addsub8.v', 'RAM32K.v',
+			'RAM32K.v', 'ROM1K16.v',
+			'addsub8.v',
 			'mf8_alu.v', 'mf8_pcs.v', 'mf8_reg.v', 'mf8_core.v',
-			'MF8A18_SoC.v', 'MF8A18.v', 'ROM512K16.v'
+			'MF8A18_SoC.v', 'MF8A18.v',
 		]],
 		'io': 'syn/io.pcf',
 		'clock': 'syn/clk.sdc'
@@ -147,10 +148,12 @@ def main():
 		'clock': 'src/clk.sdc'
 	}
 
-	build_dir = os.path.join(mf8_orig_project['dir'], 'build')
+	use_prj = mf8_project
+
+	build_dir = os.path.join(use_prj['dir'], 'build')
 	if not os.path.isdir(build_dir):
 		os.mkdir(build_dir)
-	report = make_icestorm(device, mf8_orig_project, build_dir)
+	report = make_icestorm(device, use_prj, build_dir)
 	print(f"Synthesis:")
 	print(f"\tLUTs:    {report['syn']['lut4']}")
 	print(f"\tCarries: {report['syn']['carry']}")
