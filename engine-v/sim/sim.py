@@ -3,16 +3,9 @@
 
 import os, tempfile, subprocess
 from typing import List,  Tuple
-
 from mf8 import BasicBlock, load_program, Instruction
-
-
 from functools import reduce
 
-
-
-def cat(*vargs):
-	return reduce(BVConcat, vargs)
 
 def dot_cfg(blocks: List[BasicBlock]) -> str:
 	bb_names = { bb.name for bb in blocks}
