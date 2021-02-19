@@ -17,7 +17,7 @@ def _isinstance(obj, typ) -> bool:
 	if not is_typing:
 		return isinstance(obj, typ)
 	name = typ_name.split('.')[1].split('[')[0]
-	if name == 'Union':
+	if name == 'Union' or name == 'Optional':
 		return any(_isinstance(obj, aa) for aa in typ.__args__)
 	elif name == 'List':
 		(et,) = typ.__args__
@@ -28,7 +28,7 @@ def _isinstance(obj, typ) -> bool:
 		raise NotImplementedError(f"_isinstance({obj}, {typ})")
 
 def _is_optional(typ) -> bool:
-	return(str(typ).startswith('typing.Union') and
+	return ((str(typ).startswith('typing.Union') or str(typ).startswith('typing.Optional')) and
 		   any(aa is type(None) for aa in typ.__args__))
 
 def get_fields_of_class(cls):
